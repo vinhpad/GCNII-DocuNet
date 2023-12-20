@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from torch import nn
 import torch.nn.functional as F
-from loss import GCNLoss
+from models.loss import GCNLoss
 from opt_einsum import contract
 
 class GCN(nn.Module):
@@ -22,18 +22,16 @@ class GCN(nn.Module):
 
         self.head_extractor = nn.Linear(2 * bert_config.hidden_size + config.gnn.node_type_embedding, emb_size)
         self.tail_extractor = nn.Linear(2 * bert_config.hidden_size + config.gnn.node_type_embedding, emb_size)
-        self.bilinear = nn.Linear(emb_size * block_size, bert_config.num_labels)
+        #self.bilinear = nn.Linear(emb_size * block_size, bert_config.num_labels)
 
         self.emb_size = emb_size
         self.block_size = block_size
         self.num_labels = config.classifier.num_classes
         self.offset = 1
-        #self.gnn = GNN(config.gnn, bert_config.hidden_size + config.gnn.node_type_embedding, device)
-
         self.loss_fnt = GCNLoss()
 
     def process_long_input(self, model, input_ids, attention_mask, start_tokens, end_tokens):
-        # Split the input to 2 overlapping chunks. Now BERT can encode inputs of which the length are up to 1024.
+
         n, c = input_ids.size()
         start_tokens = torch.tensor(start_tokens).to(input_ids)
         end_tokens = torch.tensor(end_tokens).to(input_ids)

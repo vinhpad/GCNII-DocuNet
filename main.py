@@ -1,12 +1,13 @@
 import argparse
 import os.path
-
 import torch
+from logger import logger
 from transformers import AutoModel, AutoTokenizer, AutoConfig
 from dataset.utils import read_cdr
 from metadata import *
 from models.model import GCN
-
+from config.run_config import RunConfig
+from core.engine import Trainer
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
@@ -59,12 +60,12 @@ if __name__ == '__main__':
     parser.add_argument("--num_class", type=int, default=2,
                         help="Number of relation types in dataset.")
     parser.add_argument('--config_path', type=str, default='config_file/cdr_config.json')
+    parser.add_argument('--save_path', type=str, default='output')
     args = parser.parse_args()
 
-    if torch.cuda.is_available():
-        torch.device('cuda:0')
-    else:
-        torch.device('cpu')
+    # Setup device for pytorch
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    logger.info(f'Using device: {device}')
 
     # Using SciBert
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
@@ -96,25 +97,22 @@ if __name__ == '__main__':
     dev_features = reader(file_in=dev_file, tokenizer=tokenizer, max_seq_length=args.max_seq_length)
     test_feature = reader(file_in=test_file, tokenizer=tokenizer, max_seq_length=args.max_seq_length)
 
-    #print(train_features)
+    # print(train_features)
     bert_config.cls_token_id = tokenizer.cls_token_id
     bert_config.sep_token_id = tokenizer.sep_token_id
     bert_config.transformer_type = args.transformer_type
 
     config_path = args.config_path
     config = RunConfig.from_json(config_path)
-    model = ATLOPGCN(config.model, bert_model, device)
+    model = GCN(config.model, bert_model, device)
+    model.to(device)
 
-    experiment_dir = setup_experiment_dir(config, tokenizer, bert_model)
-    logger = get_logger(os.path.join(experiment_dir, 'log.txt'))
-    #model.to(device)
+    args.device = device
+    #experiment_dir = setup_experiment_dir(config, tokenizer, bert_model)
+    #logger = get_logger(os.path.join(experiment_dir, 'log.txt'))
+    # model.to(device)
+
     train_features.extend(dev_features)
-    if args.load_path == "":
-        train(args, model, train_features, dev_features, test_features, experiment_dir, logger)
-    else:
-        # model = amp.initialize(model, opt_level="O1", verbosity=0)
-        model.load_state_dict(torch.load(args.load_path))
-        dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
-        test_score, test_output = evaluate(args, model, test_features, tag="test")
-        logger.info(dev_output)
-        logger.info(test_output)
+    trainer = Trainer(args, model, train_features, test_feature)
+    trainer.train()
+    trainer.evaluate()
