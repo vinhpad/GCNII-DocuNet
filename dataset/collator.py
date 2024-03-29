@@ -1,7 +1,6 @@
 import torch
 from .graph_builder import GraphBuilder
 
-
 graph_builder = GraphBuilder()
 
 
@@ -15,9 +14,20 @@ def collate_fn(batch):
     hts = [f["hts"] for f in batch]
     input_ids = torch.tensor(input_ids, dtype=torch.long)
     input_mask = torch.tensor(input_mask, dtype=torch.float)
-    graph, num_mention, num_entity, num_sent = graph_builder.create_graph(entity_pos, sent_pos)
+    virtual_pos = [[]] * len(entity_pos)
+
+    for batch_id, entities in enumerate(entity_pos):
+        for entity in entities:
+            start = 0
+            for mention in entity:
+                end = mention[0]
+                virtual_pos[batch_id].append((start, end))
+                start = mention[1] + 1
+
+    graph, num_mention, num_entity, num_sent, num_virtual = graph_builder.create_graph(entity_pos, sent_pos,
+                                                                                       virtual_pos)
     output = (input_ids, input_mask,
-              entity_pos, sent_pos,
-              graph, num_mention, num_entity, num_sent,
+              entity_pos, sent_pos, virtual_pos,
+              graph, num_mention, num_entity, num_sent, num_virtual,
               labels, hts)
     return output

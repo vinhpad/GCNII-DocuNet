@@ -64,7 +64,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Setup device for pytorch
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     logger.info(f'Using device: {device}')
 
     # Using SciBert
@@ -96,6 +96,7 @@ if __name__ == '__main__':
     train_features = reader(file_in=train_file, tokenizer=tokenizer, max_seq_length=args.max_seq_length)
     dev_features = reader(file_in=dev_file, tokenizer=tokenizer, max_seq_length=args.max_seq_length)
     test_feature = reader(file_in=test_file, tokenizer=tokenizer, max_seq_length=args.max_seq_length)
+
 
     # print(train_features)
     bert_config.cls_token_id = tokenizer.cls_token_id
