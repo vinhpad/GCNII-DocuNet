@@ -130,6 +130,7 @@ class Trainer:
                 graph, num_mention, num_entity, num_sent,
                 labels, hts
             ) = batch
+
             inputs = {'input_ids': input_ids.to(self.device),
                       'attention_mask': input_mask.to(self.device),
                       'entity_pos': entity_pos,
@@ -138,6 +139,7 @@ class Trainer:
                       'num_mention': num_mention,
                       'num_entity': num_entity,
                       'num_sent': num_sent,
+                      'labels': labels,
                       'hts': hts,
                       }
 
