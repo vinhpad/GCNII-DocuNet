@@ -10,6 +10,7 @@ def collate_fn(batch):
     input_mask = [[1.0] * len(f["input_ids"]) + [0.0] * (max_len - len(f["input_ids"])) for f in batch]
     labels = [f["labels"] for f in batch]
     entity_pos = [f["entity_pos"] for f in batch]
+    print(entity_pos)
     sent_pos = [f['sent_pos'] for f in batch]
     hts = [f["hts"] for f in batch]
     input_ids = torch.tensor(input_ids, dtype=torch.long)
@@ -22,7 +23,7 @@ def collate_fn(batch):
             for mention in entity:
                 end = mention[0]
                 virtual_pos[batch_id].append((start, end))
-                start = mention[1] + 1
+                start = mention[1]
 
     graph, num_mention, num_entity, num_sent, num_virtual = graph_builder.create_graph(entity_pos, sent_pos,
                                                                                        virtual_pos)
