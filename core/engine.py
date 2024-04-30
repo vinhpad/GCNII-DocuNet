@@ -89,8 +89,7 @@ class Trainer:
                       'num_mention': num_mention,
                       'num_entity': num_entity,
                       'num_sent': num_sent,
-                        'num_virtual': num_virtual,
-                      'labels': labels,
+                      'num_virtual': num_virtual,
                       'hts': hts,
                       }
 
