@@ -34,7 +34,8 @@ class Trainer:
             logger.error('ERROR in training loop or eval/save model.')
             raise
         finally:
-            self.train_after_loop()
+            pass
+            #self.train_after_loop()
 
     def before_train_loop(self):
         print("Training start...")
@@ -90,6 +91,7 @@ class Trainer:
                       'num_entity': num_entity,
                       'num_sent': num_sent,
                       'num_virtual': num_virtual,
+                      'labels': labels,
                       'hts': hts,
                       }
 
@@ -110,7 +112,8 @@ class Trainer:
                 logger.info(loss)
 
     def train_after_loop(self):
-        torch.save(self.model.state_dict(), os.path.join(self.args.save_path, 'model.pt'))
+        pass
+        #torch.save(self.model.state_dict(), os.path.join(self.args.save_path, 'model.pt'))
 
 
     def evaluate(self):
@@ -141,8 +144,7 @@ class Trainer:
                       'num_mention': num_mention,
                       'num_entity': num_entity,
                       'num_sent': num_sent,
-                        'num_virtual': num_virtual,
-                      'labels': labels,
+                      'num_virtual': num_virtual,
                       'hts': hts,
                       }
 
