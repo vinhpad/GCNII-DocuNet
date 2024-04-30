@@ -1,4 +1,4 @@
 {
-  "tokenizer_name": "allenai/scibert_scivocab_uncased",
-  "model_name":"allenai/scibert_scivocab_uncased"
+  "tokenizer_name": "microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract",
+  "model_name":"microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract"
 }
