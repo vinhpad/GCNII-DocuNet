@@ -199,7 +199,7 @@ class GCN(nn.Module):
         batch_size, _, embed_dim = sequence_output.shape
         virtual_embed = torch.zeros((batch_size, num_virtual, embed_dim)).to(self.device)
         for batch_id, virtual_pos in enumerate(batch_virtual_pos):
-            for vir_pos,id in enumerate(virtual_pos):
+            for id, vir_pos in enumerate(virtual_pos):
                 virtual_embed[batch_id][id] = sequence_output[batch_id][vir_pos[0] + self.offset]
         return virtual_embed
     
