@@ -75,19 +75,21 @@ class Trainer:
             self.model.train()
             (
                 input_ids, input_mask,
-                entity_pos, sent_pos,
-                graph, num_mention, num_entity, num_sent,
+                batch_entity_pos, batch_sent_pos, batch_virtual_pos, 
+                graph, num_mention, num_entity, num_sent, num_virtual,
                 labels, hts
             ) = batch
 
             inputs = {'input_ids': input_ids.to(self.device),
                       'attention_mask': input_mask.to(self.device),
-                      'entity_pos': entity_pos,
-                      'sent_pos': sent_pos,
+                      'entity_pos': batch_entity_pos,
+                      'sent_pos': batch_sent_pos,
+                      'virtual_pos': batch_virtual_pos,
                       'graph': graph.to(self.device),
                       'num_mention': num_mention,
                       'num_entity': num_entity,
                       'num_sent': num_sent,
+                      'num_virtual': num_virtual,
                       'labels': labels,
                       'hts': hts,
                       }
@@ -126,19 +128,22 @@ class Trainer:
             self.model.eval()
             (
                 input_ids, input_mask,
-                entity_pos, sent_pos,
-                graph, num_mention, num_entity, num_sent,
+                entity_pos, sent_pos, virtual_pos,
+                graph, num_mention, num_entity, num_sent, num_virtual,
                 labels, hts
             ) = batch
 
-            inputs = {'input_ids': input_ids.to(self.device),
+            inputs = {
+                'input_ids': input_ids.to(self.device),
                       'attention_mask': input_mask.to(self.device),
                       'entity_pos': entity_pos,
                       'sent_pos': sent_pos,
+                      'virtual_pos': virtual_pos,
                       'graph': graph.to(self.device),
                       'num_mention': num_mention,
                       'num_entity': num_entity,
                       'num_sent': num_sent,
+                      'num_virtual': num_virtual,
                       'labels': labels,
                       'hts': hts,
                       }

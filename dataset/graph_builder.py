@@ -1,7 +1,7 @@
 import dgl
 from .graph_builder_utils import *
 import torch
-import matplotlib.pyplot as plt
+import networkx as nx
 
 class GraphBuilder:
     def __init__(self,
@@ -98,7 +98,7 @@ class GraphBuilder:
                                                                          num_sent * batch_size +
                                                                          num_virtual * batch_size))
         
-
+        
 
         if self.add_self_edge:
             graph = dgl.add_self_loop(graph)
