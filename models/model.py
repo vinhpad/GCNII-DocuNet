@@ -195,6 +195,14 @@ class GCN(nn.Module):
         t_embed = torch.stack(t_embed, dim=0)
         return s_embed, t_embed
 
+    def get_virtual_embed(self, sequence_output, batch_virtual_pos, num_virtual):
+        batch_size, _, embed_dim = sequence_output.shape
+        virtual_embed = torch.zeros((batch_size, num_virtual, embed_dim)).to(self.device)
+        for batch_id, virtual_pos in enumerate(batch_virtual_pos):
+            for vir_pos,id in enumerate(virtual_pos):
+                virtual_embed[batch_id][id] = sequence_output[batch_id][vir_pos[0] + self.offset]
+        return virtual_embed
+    
     def forward(self, input_ids, attention_mask,
                 entity_pos, sent_pos, virtual_pos,
                 graph, num_mention, num_entity, num_sent, num_virtual,
@@ -203,7 +211,9 @@ class GCN(nn.Module):
         mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
         entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
         sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
-        entity_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, graph])
+        virtual_embed = self.get_virtual_embed(sequence_output, virtual_pos, num_virtual)
+
+        entity_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph])
         local_context = self.get_rss(sequence_output, attention, entity_pos, hts)
         s_embed, t_embed = self.get_pair_entity_embed(entity_hidden_state, hts)
 
