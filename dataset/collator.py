@@ -60,11 +60,7 @@ def create_virtual_node(batch_entity_pos):
                tokens.append([token_pos, token_pos]) 
         for token in tokens:
             virtual_node.append(token)
-            
+
         batch_virtual_node.append(virtual_node)
 
-       
-
-        
-    
     return batch_virtual_node
