@@ -98,8 +98,6 @@ class GraphBuilder:
                                                                          num_sent * batch_size +
                                                                          num_virtual * batch_size))
         
-        
-
         if self.add_self_edge:
             graph = dgl.add_self_loop(graph)
         return graph, num_mention, num_entity, num_sent, num_virtual

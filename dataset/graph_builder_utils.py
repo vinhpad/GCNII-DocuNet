@@ -133,6 +133,23 @@ def get_virtual_to_token_edges(num_virtual, batch_virtual_pos) -> Tuple[List[int
                         u.append(get_id(num_virtual, batch_id, internal_idx_1))
                         v.append(get_id(num_virtual, batch_id, internal_idx_2))
 
+                for internal_idx_2, _ in enumerate(virtual_pos):  
+                    # is token 
+                    _token_left = virtual_pos[internal_idx_1][0]
+                    _token_right = virtual_pos[internal_idx_1][1]
+                    if _token_left != _token_right:
+                        continue
+
+                    # is token
+                    token_left = virtual_pos[internal_idx_2][0]
+                    token_right = virtual_pos[internal_idx_2][1]
+                    if token_left != token_right:
+                        continue
+
+                    if _token_left == token_left + 1:
+                        u.append(get_id(num_virtual, batch_id, internal_idx_1))
+                        v.append(get_id(num_virtual, batch_id, internal_idx_2))
+
     return u, v
 
 def get_id(num_col: int, row_idx: int, col_idx: int) -> int:
