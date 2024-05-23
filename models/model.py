@@ -196,8 +196,8 @@ class GCN(nn.Module):
         return s_embed, t_embed
 
     def forward(self, input_ids, attention_mask,
-                entity_pos, sent_pos,
-                graph, num_mention, num_entity, num_sent,
+                entity_pos, sent_pos, virtual_pos,
+                graph, num_mention, num_entity, num_sent, num_virtual,
                 labels=None, hts=None):
         sequence_output, attention = self.encode(input_ids, attention_mask)
         mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
