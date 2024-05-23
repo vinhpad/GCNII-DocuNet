@@ -44,14 +44,27 @@ def create_virtual_node(batch_entity_pos):
                 mentions.append(mention)
 
         mentions.sort(key=lambda mention: mention[0])
-        virtual_node.append[[0, mentions[0]]]
+        if 0 < mentions[0][0]:
+            virtual_node.append[[0, mentions[0][0]]]
         
         for idx in range(1, len(mentions)):
-            virtual_node.append([mentions[idx-1][1],mentions[idx][0]])
-
-        batch_virtual_node.append(virtual_node)
+            if mention[idx][1] < mention[idx][0] :
+                virtual_node.append([mentions[idx-1][1],mentions[idx][0]])
 
         print(mentions)
         print(virtual_node)
+        
+        tokens = []
+        for vir_node in virtual_node:
+            for token_pos in range(vir_node[0], vir_node[1]):
+               tokens.append([token_pos, token_pos]) 
+        for token in tokens:
+            virtual_node.append(token)
+            
+        batch_virtual_node.append(virtual_node)
+
+       
+
+        
     
     return batch_virtual_node
