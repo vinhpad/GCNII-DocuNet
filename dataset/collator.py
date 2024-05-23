@@ -45,10 +45,10 @@ def create_virtual_node(batch_entity_pos):
 
         mentions.sort(key=lambda mention: mention[0])
         if 0 < mentions[0][0]:
-            virtual_node.append[[0, mentions[0][0]]]
+            virtual_node.append([0, mentions[0][0]])
         
         for idx in range(1, len(mentions)):
-            if mention[idx][1] < mention[idx][0] :
+            if mentions[idx][1] < mentions[idx][0] :
                 virtual_node.append([mentions[idx-1][1],mentions[idx][0]])
 
         print(mentions)
