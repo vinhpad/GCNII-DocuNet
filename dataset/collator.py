@@ -50,9 +50,6 @@ def create_virtual_node(batch_entity_pos):
         for idx in range(1, len(mentions)):
             if mentions[idx-1][1] < mentions[idx][0] :
                 virtual_node.append([mentions[idx-1][1],mentions[idx][0]])
-
-        print(mentions)
-        print(virtual_node)
         
         tokens = []
         for vir_node in virtual_node:
