@@ -42,7 +42,7 @@ if __name__ == '__main__':
     parser.add_argument("--num_labels", default=1, type=int,
                         help="Max number of labels in the prediction.")
 
-    parser.add_argument("--learning_rate", default=2e-5, type=float,
+    parser.add_argument("--learning_rate", default=1e-6, type=float,
                         help="The initial learning rate for Adam.")
 
     parser.add_argument("--adam_epsilon", default=1e-6, type=float,

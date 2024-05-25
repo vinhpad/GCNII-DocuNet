@@ -21,6 +21,7 @@ class Trainer:
         self.test_feature = test_feature
         self.args = args
         self.device = args.device
+        
 
     def train(self):
         try:
@@ -28,16 +29,17 @@ class Trainer:
             for self.epoch in range(self.max_epoch):
                 self.before_epoch()
                 self.train_one_epoch(self.epoch)
-                #self.after_epoch()
+                self.after_epoch()
             #self.strip_model()
         except Exception as _:
             logger.error('ERROR in training loop or eval/save model.')
             raise
         finally:
-            self.train_after_loop()
+            self.strip_model()
 
     def before_train_loop(self):
-        print("Training start...")
+        logger.info(f'Start epoch {self.epoch}')
+
         new_layer = ["extractor", "bilinear"]
         optimizer_grouped_parameters = [
             {"params": [p for n, p in self.model.named_parameters() if not any(nd in n for nd in new_layer)], },
@@ -64,9 +66,10 @@ class Trainer:
                                                          num_warmup_steps=warmup_steps,
                                                          num_training_steps=total_steps)
 
-        logger.info("Warmup steps: {}".format(warmup_steps))
+        #logger.info("Warmup steps: {}".format(warmup_steps))
 
     def before_epoch(self):
+        logger.info(f'End epoch {self.epoch}')
         self.model.zero_grad()
 
     def train_one_epoch(self, epoch):
@@ -107,12 +110,15 @@ class Trainer:
                 self.model.zero_grad()
                 #num_steps += 1
             # wandb.log({"loss": loss.item()}, step=num_steps)
-            if step % 100 == 0:
-                logger.info(loss)
+            # if step % 100 == 0:
+            #    logger.info(loss)
 
-    def train_after_loop(self):
+    def strip_model(self):
         torch.save(self.model.state_dict(), os.path.join(self.args.save_path, 'model.pt'))
 
+
+    def after_epoch(self):
+        self.evaluate()
 
     def evaluate(self):
         test_loader = DataLoader(
