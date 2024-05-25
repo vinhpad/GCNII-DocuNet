@@ -69,7 +69,6 @@ class Trainer:
         #logger.info("Warmup steps: {}".format(warmup_steps))
 
     def before_epoch(self):
-        logger.info(f'End epoch {self.epoch}')
         self.model.zero_grad()
 
     def train_one_epoch(self, epoch):
@@ -119,6 +118,7 @@ class Trainer:
 
     def after_epoch(self):
         self.evaluate()
+        logger.info(f'End epoch {self.epoch}')
 
     def evaluate(self):
         test_loader = DataLoader(
