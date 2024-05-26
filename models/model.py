@@ -32,6 +32,11 @@ class GCN(nn.Module):
         self.gnn = GNN(config.gnn, bert_config.hidden_size + config.gnn.node_type_embedding, device)
         self.loss_fnt = GCNLoss()
 
+        # classification
+        self.sotfmax = nn.Linear(emb_size * block_size, 4)
+        self.cross_entropy_loss = nn.CrossEntropyLoss()
+
+
     def process_long_input(self, model, input_ids, attention_mask, start_tokens, end_tokens):
 
         n, c = input_ids.size()
@@ -225,10 +230,17 @@ class GCN(nn.Module):
         bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
         logits = self.bilinear(bl)
 
+        #node_logits = self.softmax(entity_hidden_state.view(-1, self.emb_size * self.block_size))
+        #node_loss = 
+        
+
         output = (self.loss_fnt.get_label(logits, num_labels=self.num_labels),)
         if labels is not None:
             labels = [torch.tensor(label) for label in labels]
             labels = torch.cat(labels, dim=0).to(logits)
             loss = self.loss_fnt(logits.float(), labels.float())
+            #ner_loss = self.node_loss_fnt(node_logits, float(5))
+            #loss = re_loss + ner_loss
+
             output = (loss.to(sequence_output),) + output
         return output
