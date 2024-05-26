@@ -36,7 +36,7 @@ def collate_fn(batch):
     labels_node = torch.tensor(labels_node, dtype = torch.long)
 
     num_node = num_mention + num_entity + num_sent + num_virtual
-    labels_node = torch.reshape(labels_node, (len(batch) * num_node))
+    labels_node = torch.reshape(labels_node, (len(batch) * num_node, -1))
 
     output = (input_ids, input_mask,
               batch_entity_pos, 
