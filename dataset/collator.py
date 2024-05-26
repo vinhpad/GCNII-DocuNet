@@ -20,7 +20,7 @@ def collate_fn(batch):
     graph, num_mention, num_entity, num_sent, num_virtual = graph_builder.create_graph(batch_entity_pos, batch_sent_pos, batch_virtual_pos)
     
     labels_node = [[]]*len(batch)
-    for batch_id, _ in batch:
+    for batch_id, _ in enumerate(batch):
         for _ in range(num_mention):
             labels_node[batch_id].append(0)
 
