@@ -33,7 +33,7 @@ class GCN(nn.Module):
         self.loss_fnt = GCNLoss()
 
         # classification
-        self.sotfmax = nn.Linear(emb_size * block_size, 4)
+        self.sotfmax = nn.Linear(818, 4)
         self.cross_entropy_loss = nn.CrossEntropyLoss()
 
 
@@ -211,14 +211,14 @@ class GCN(nn.Module):
     def forward(self, input_ids, attention_mask,
                 entity_pos, sent_pos, virtual_pos,
                 graph, num_mention, num_entity, num_sent, num_virtual,
-                labels=None, hts=None):
+                labels=None, labels_node=None, hts=None):
         sequence_output, attention = self.encode(input_ids, attention_mask)
         mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
         entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
         sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
         virtual_embed = self.get_virtual_embed(sequence_output, virtual_pos, num_virtual)
 
-        entity_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph])
+        entity_hidden_state, output_node_hiden_state = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph])
         local_context = self.get_rss(sequence_output, attention, entity_pos, hts)
         s_embed, t_embed = self.get_pair_entity_embed(entity_hidden_state, hts)
 
@@ -230,15 +230,14 @@ class GCN(nn.Module):
         bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
         logits = self.bilinear(bl)
 
-        #node_logits = self.softmax(entity_hidden_state.view(-1, self.emb_size * self.block_size))
-        #node_loss = 
+        node_logits = self.sotfmax(entity_hidden_state)
         
-
         output = (self.loss_fnt.get_label(logits, num_labels=self.num_labels),)
         if labels is not None:
             labels = [torch.tensor(label) for label in labels]
             labels = torch.cat(labels, dim=0).to(logits)
             loss = self.loss_fnt(logits.float(), labels.float())
+            loss = loss + self.cross_entropy_loss(node_logits, labels_node)
             #ner_loss = self.node_loss_fnt(node_logits, float(5))
             #loss = re_loss + ner_loss
 

@@ -79,7 +79,7 @@ class Trainer:
                 input_ids, input_mask,
                 batch_entity_pos, batch_sent_pos, batch_virtual_pos, 
                 graph, num_mention, num_entity, num_sent, num_virtual,
-                labels, hts
+                labels, labels_node, hts
             ) = batch
 
             inputs = {'input_ids': input_ids.to(self.device),
@@ -93,6 +93,7 @@ class Trainer:
                       'num_sent': num_sent,
                       'num_virtual': num_virtual,
                       'labels': labels,
+                      'labels_node': labels_node,
                       'hts': hts,
                       }
 
