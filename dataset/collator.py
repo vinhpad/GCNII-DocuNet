@@ -73,7 +73,7 @@ def create_virtual_node(batch_entity_pos):
         tokens = []
         for vir_node in virtual_node:
             for token_pos in range(vir_node[0], vir_node[1]):
-               tokens.append([token_pos, token_pos]) 
+               tokens.append([token_pos, token_pos + 1]) 
         for token in tokens:
             virtual_node.append(token)
 
