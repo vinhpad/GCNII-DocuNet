@@ -239,7 +239,7 @@ class GCN(nn.Module):
             labels_node = labels_node.to(self.device)
 
             loss = self.loss_fnt(logits.float(), labels.float())
-            #loss = loss + self.cross_entropy_loss(node_logits.float(), labels_node)
+            loss = loss + self.cross_entropy_loss(node_logits.float(), labels_node)
 
             output = (loss.to(sequence_output),) + output
         return output
