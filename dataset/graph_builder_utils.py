@@ -125,7 +125,7 @@ def get_virtual_to_token_edges(num_virtual, batch_virtual_pos) -> Tuple[List[int
                     # is token
                     token_left = virtual_pos[internal_idx_2][0]
                     token_right = virtual_pos[internal_idx_2][1]
-                    if token_left + 1 != token_right:
+                    if token_left != token_right:
                         continue
 
                     # is valid
