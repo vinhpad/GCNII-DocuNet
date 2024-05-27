@@ -230,14 +230,16 @@ class GCN(nn.Module):
         bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
         logits = self.bilinear(bl)
 
-        node_logits = self.sotfmax(entity_hidden_state)
+        node_logits = self.sotfmax(output_node_hiden_state)
         
         output = (self.loss_fnt.get_label(logits, num_labels=self.num_labels),)
         if labels is not None:
             labels = [torch.tensor(label) for label in labels]
             labels = torch.cat(labels, dim=0).to(logits)
+            labels_node.to(self.device)
+
             loss = self.loss_fnt(logits.float(), labels.float())
-            loss = loss + self.cross_entropy_loss(node_logits, labels_node)
+            loss = loss + self.cross_entropy_loss(node_logits.float(), labels_node)
             #ner_loss = self.node_loss_fnt(node_logits, float(5))
             #loss = re_loss + ner_loss
 

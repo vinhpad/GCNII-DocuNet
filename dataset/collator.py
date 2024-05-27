@@ -19,24 +19,24 @@ def collate_fn(batch):
 
     graph, num_mention, num_entity, num_sent, num_virtual = graph_builder.create_graph(batch_entity_pos, batch_sent_pos, batch_virtual_pos)
     
-    labels_node = [[]]*len(batch)
+    labels_node = []*len(batch)
     for batch_id, _ in enumerate(batch):
         for _ in range(num_mention):
-            labels_node[batch_id].append(0)
+            labels_node.append(0)
 
         for _ in range(num_entity):
-            labels_node[batch_id].append(1)
+            labels_node.append(1)
 
         for _ in range(num_sent):
-            labels_node[batch_id].append(2)
+            labels_node.append(2)
 
         for _ in range(num_virtual):
-            labels_node[batch_id].append(3)
+            labels_node.append(3)
 
     labels_node = torch.tensor(labels_node, dtype = torch.long)
 
-    num_node = num_mention + num_entity + num_sent + num_virtual
-    labels_node = torch.reshape(labels_node, (len(batch) * num_node, -1))
+    #num_node = num_mention + num_entity + num_sent + num_virtual
+    #labels_node = torch.reshape(labels_node, (len(batch) * num_node, -1))
 
     output = (input_ids, input_mask,
               batch_entity_pos, 

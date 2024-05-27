@@ -137,7 +137,7 @@ class Trainer:
                 input_ids, input_mask,
                 entity_pos, sent_pos, virtual_pos,
                 graph, num_mention, num_entity, num_sent, num_virtual,
-                labels, hts
+                labels, labels_node, hts
             ) = batch
 
             inputs = {'input_ids': input_ids.to(self.device),
