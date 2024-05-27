@@ -236,7 +236,7 @@ class GCN(nn.Module):
         if labels is not None:
             labels = [torch.tensor(label) for label in labels]
             labels = torch.cat(labels, dim=0).to(logits)
-            labels_node.to(self.device)
+            labels_node = labels_node.to(self.device)
 
             loss = self.loss_fnt(logits.float(), labels.float())
             loss = loss + self.cross_entropy_loss(node_logits.float(), labels_node)
