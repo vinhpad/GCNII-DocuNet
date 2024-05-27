@@ -19,12 +19,12 @@ def collate_fn(batch):
 
     graph, num_mention, num_entity, num_sent, num_virtual = graph_builder.create_graph(batch_entity_pos, batch_sent_pos, batch_virtual_pos)
     
-    for batch_id, _ in enumerate(batch_virtual_pos):
-        virtual_pos = batch_virtual_pos[batch_id]
-        for i in range(len(virtual_pos)):
-            if virtual_pos[i][0] == virtual_pos[i][1]:
-                virtual_pos[i][1] = virtual_pos[i][1] + 1
 
+    for batch_id, _ in enumerate(batch_virtual_pos):
+        for i in range(len(batch_virtual_pos[batch_id])):
+            if batch_virtual_pos[batch_id][i][0] == batch_virtual_pos[batch_id][i][1]:
+                batch_virtual_pos[batch_id][i][1] = batch_virtual_pos[batch_id][i][1] + 1
+                
     labels_node = []*len(batch)
     for batch_id, _ in enumerate(batch):
         for _ in range(num_mention):
@@ -60,7 +60,7 @@ def collate_fn(batch):
 
 def create_virtual_node(batch_entity_pos):
     batch_virtual_node = []
-    num_virtual_left_right = 0
+
     for batch_id, entities_pos in enumerate(batch_entity_pos):
         virtual_node = []   
         mentions = []
@@ -71,7 +71,7 @@ def create_virtual_node(batch_entity_pos):
         mentions.sort(key=lambda mention: mention[0])
         if 0 < mentions[0][0]:
             virtual_node.append([0, mentions[0][0]])
-            
+        
         for idx in range(1, len(mentions)):
             if mentions[idx-1][1] < mentions[idx][0] :
                 virtual_node.append([mentions[idx-1][1],mentions[idx][0]])
