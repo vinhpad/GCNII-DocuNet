@@ -18,12 +18,6 @@ def collate_fn(batch):
     input_mask = torch.tensor(input_mask, dtype=torch.float)
 
     graph, num_mention, num_entity, num_sent, num_virtual = graph_builder.create_graph(batch_entity_pos, batch_sent_pos, batch_virtual_pos)
-    
-
-    for batch_id, _ in enumerate(batch_virtual_pos):
-        for i in range(len(batch_virtual_pos[batch_id])):
-            if batch_virtual_pos[batch_id][i][0] == batch_virtual_pos[batch_id][i][1]:
-                batch_virtual_pos[batch_id][i][1] = batch_virtual_pos[batch_id][i][1] + 1
                 
     labels_node = []*len(batch)
     for batch_id, _ in enumerate(batch):

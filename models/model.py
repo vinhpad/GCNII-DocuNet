@@ -33,8 +33,8 @@ class GCN(nn.Module):
         self.loss_fnt = GCNLoss()
 
         # classification
-        self.sotfmax = nn.Linear(818, 4)
-        self.cross_entropy_loss = nn.CrossEntropyLoss()
+        # self.sotfmax = nn.Linear(818, 4)
+        # self.cross_entropy_loss = nn.CrossEntropyLoss()
 
 
     def process_long_input(self, model, input_ids, attention_mask, start_tokens, end_tokens):
@@ -218,7 +218,7 @@ class GCN(nn.Module):
         sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
         virtual_embed = self.get_virtual_embed(sequence_output, virtual_pos, num_virtual)
 
-        entity_hidden_state, output_node_hiden_state = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph])
+        entity_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph])
         local_context = self.get_rss(sequence_output, attention, entity_pos, hts)
         s_embed, t_embed = self.get_pair_entity_embed(entity_hidden_state, hts)
 
@@ -230,16 +230,16 @@ class GCN(nn.Module):
         bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
         logits = self.bilinear(bl)
 
-        node_logits = self.sotfmax(output_node_hiden_state)
+        # node_logits = self.sotfmax(output_node_hiden_state)
         
         output = (self.loss_fnt.get_label(logits, num_labels=self.num_labels),)
         if labels is not None:
             labels = [torch.tensor(label) for label in labels]
             labels = torch.cat(labels, dim=0).to(logits)
-            labels_node = labels_node.to(self.device)
+            # labels_node = labels_node.to(self.device)
 
             loss = self.loss_fnt(logits.float(), labels.float())
-            loss = loss + self.cross_entropy_loss(node_logits.float(), labels_node)
+            # loss = loss + self.cross_entropy_loss(node_logits.float(), labels_node)
 
             output = (loss.to(sequence_output),) + output
         return output
