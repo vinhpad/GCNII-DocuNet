@@ -33,7 +33,7 @@ class GCN(nn.Module):
         self.loss_fnt = GCNLoss()
 
         # classification
-        # self.sotfmax = nn.Linear(818, 4)
+        # self.sotfmax = nn.Linear(, config.)
         # self.cross_entropy_loss = nn.CrossEntropyLoss()
 
 
@@ -204,10 +204,17 @@ class GCN(nn.Module):
         batch_size, _, embed_dim = sequence_output.shape
         virtual_embed = torch.zeros((batch_size, num_virtual, embed_dim)).to(self.device)
         for batch_id, virtual_pos in enumerate(batch_virtual_pos):
-            for id, vir_pos in enumerate(virtual_pos):
-                virtual_embed[batch_id][id] = sequence_output[batch_id][vir_pos[0] + self.offset]
+            for virtual_id, vir_pos in enumerate(virtual_pos):
+                if vir_pos[0] == vir_pos[1]:
+                    virtual_embed[batch_id][virtual_id] = sequence_output[batch_id][vir_pos[0] + self.offset]
+                else:
+                    embeds = []
+                    for virtual_id2, token in enumerate(virtual_pos):
+                        embeds.append(sequence_output[batch_id][token[0] + self.offset])
+                    virtual_embed[batch_id][virtual_id] = torch.logsumexp(torch.stack(embeds, dim=0), dim=0)
         return virtual_embed
-    
+
+
     def forward(self, input_ids, attention_mask,
                 entity_pos, sent_pos, virtual_pos,
                 graph, num_mention, num_entity, num_sent, num_virtual,
