@@ -210,7 +210,8 @@ class GCN(nn.Module):
                 else:
                     embeds = []
                     for virtual_id2, token in enumerate(virtual_pos):
-                        embeds.append(sequence_output[batch_id][token[0] + self.offset])
+                        if vir_pos[0] <= token[0] < vir_pos[1]:
+                            embeds.append(sequence_output[batch_id][token[0] + self.offset])
                     virtual_embed[batch_id][virtual_id] = torch.logsumexp(torch.stack(embeds, dim=0), dim=0)
         return virtual_embed
 
