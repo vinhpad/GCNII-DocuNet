@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from models.loss import GCNLoss
 from opt_einsum import contract
 
+
 class GCN(nn.Module):
     def __init__(self, config,
                  # bert_config,
@@ -31,11 +32,6 @@ class GCN(nn.Module):
         self.offset = 1
         self.gnn = GNN(config.gnn, bert_config.hidden_size + config.gnn.node_type_embedding, device)
         self.loss_fnt = GCNLoss()
-
-        # classification
-        # self.sotfmax = nn.Linear(, config.)
-        # self.cross_entropy_loss = nn.CrossEntropyLoss()
-
 
     def process_long_input(self, model, input_ids, attention_mask, start_tokens, end_tokens):
 
@@ -120,7 +116,8 @@ class GCN(nn.Module):
             end_tokens = [config.sep_token_id, config.sep_token_id]
         else:
             raise NotImplementedError()
-        sequence_output, attention = self.process_long_input(self.bert_model, input_ids, attention_mask, start_tokens, end_tokens)
+        sequence_output, attention = self.process_long_input(self.bert_model, input_ids, attention_mask, start_tokens,
+                                                             end_tokens)
         return sequence_output, attention
 
     def get_sent_embed(self, sequence_output, batch_sent_pos, num_sent):
@@ -209,12 +206,12 @@ class GCN(nn.Module):
                     virtual_embed[batch_id][virtual_id] = sequence_output[batch_id][vir_pos[0] + self.offset]
                 else:
                     embeds = []
-                    for virtual_id2, token in enumerate(virtual_pos):
-                        if vir_pos[0] <= token[0] < vir_pos[1]:
-                            embeds.append(sequence_output[batch_id][token[0] + self.offset])
+                    for virtual_id2, token_pos in enumerate(virtual_pos):
+                        if vir_pos[0] <= token_pos[0] < vir_pos[1]:
+                            embeds.append(sequence_output[batch_id][token_pos[0] + self.offset])
+
                     virtual_embed[batch_id][virtual_id] = torch.logsumexp(torch.stack(embeds, dim=0), dim=0)
         return virtual_embed
-
 
     def forward(self, input_ids, attention_mask,
                 entity_pos, sent_pos, virtual_pos,
@@ -238,16 +235,10 @@ class GCN(nn.Module):
         bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
         logits = self.bilinear(bl)
 
-        # node_logits = self.sotfmax(output_node_hiden_state)
-        
         output = (self.loss_fnt.get_label(logits, num_labels=self.num_labels),)
         if labels is not None:
             labels = [torch.tensor(label) for label in labels]
             labels = torch.cat(labels, dim=0).to(logits)
-            # labels_node = labels_node.to(self.device)
-
             loss = self.loss_fnt(logits.float(), labels.float())
-            # loss = loss + self.cross_entropy_loss(node_logits.float(), labels_node)
-
             output = (loss.to(sequence_output),) + output
         return output

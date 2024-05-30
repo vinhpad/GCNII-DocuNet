@@ -60,12 +60,11 @@ if __name__ == '__main__':
     parser.add_argument("--num_class", type=int, default=2,
                         help="Number of relation types in dataset.")
     parser.add_argument('--config_path', type=str, default='config_file/cdr_config.json')
-    parser.add_argument('--save_path', type=str, default='output')
+    parser.add_argument('--save_path', type=str, default='.')
     args = parser.parse_args()
 
     # Setup device for pytorch
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    #device = torch.device('cpu')
     logger.info(f'Using device: {device}')
 
     # Using SciBert

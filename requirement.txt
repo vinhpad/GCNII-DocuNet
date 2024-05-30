@@ -1,10 +1,4 @@
-spacy==2.3.5
-allennlp~=2.10.1
-numpy~=1.24.1
-tqdm~=4.64.1
-https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.3.0/en_core_sci_md-0.3.0.tar.gz
-scikit-learn
-torch_optimizer
-dgl~=1.0.1
-torch~=2.1.0
-transformers~=4.20.1
+torch==2.3.0
+dgl -f https://data.dgl.ai/wheels/torch-2.3/cu121/repo.html
+transformers==4.21.0
+logger

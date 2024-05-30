@@ -35,10 +35,11 @@ class Trainer:
             logger.error('ERROR in training loop or eval/save model.')
             raise
         finally:
-            self.strip_model()
+            pass
+            #self.strip_model()
 
     def before_train_loop(self):
-        logger.info(f'Start epoch {self.epoch}')
+        # logger.info(f'Start epoch {self.epoch}')
 
         new_layer = ["extractor", "bilinear"]
         optimizer_grouped_parameters = [
@@ -69,7 +70,7 @@ class Trainer:
         #logger.info("Warmup steps: {}".format(warmup_steps))
 
     def before_epoch(self):
-        self.model.zero_grad()
+        pass
 
     def train_one_epoch(self, epoch):
         self.model.zero_grad()
@@ -118,8 +119,9 @@ class Trainer:
 
 
     def after_epoch(self):
-        self.evaluate()
-        logger.info(f'End epoch {self.epoch}')
+        pass
+        # self.evaluate()
+        # logger.info(f'End epoch {self.epoch}')
 
     def evaluate(self):
         test_loader = DataLoader(
