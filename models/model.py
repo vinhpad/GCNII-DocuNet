@@ -205,14 +205,14 @@ class GCN(nn.Module):
         virtual_embed = torch.zeros((batch_size, num_virtual, embed_dim)).to(self.device)
         for batch_id, virtual_pos in enumerate(batch_virtual_pos):
             for virtual_id, vir_pos in enumerate(virtual_pos):
-                if vir_pos[0] == vir_pos[1]:
-                    virtual_embed[batch_id][virtual_id] = sequence_output[batch_id][vir_pos[0] + self.offset]
-                else:
-                    embeds = []
-                    for virtual_id2, token in enumerate(virtual_pos):
-                        if vir_pos[0] <= token[0] < vir_pos[1]:
-                            embeds.append(sequence_output[batch_id][token[0] + self.offset])
-                    virtual_embed[batch_id][virtual_id] = torch.logsumexp(torch.stack(embeds, dim=0), dim=0)
+                #if vir_pos[0] == vir_pos[1]:
+                virtual_embed[batch_id][virtual_id] = sequence_output[batch_id][vir_pos[0] + self.offset]
+                #else:
+                #    embeds = []
+                #    for virtual_id2, token in enumerate(virtual_pos):
+                #        if vir_pos[0] <= token[0] < vir_pos[1]:
+                #            embeds.append(sequence_output[batch_id][token[0] + self.offset])
+                #    virtual_embed[batch_id][virtual_id] = torch.logsumexp(torch.stack(embeds, dim=0), dim=0)
         return virtual_embed
 
 

@@ -27,9 +27,9 @@ class Trainer:
         try:
             self.before_train_loop()
             for self.epoch in range(self.max_epoch):
-                self.before_epoch()
+                #self.before_epoch()
                 self.train_one_epoch(self.epoch)
-                self.after_epoch()
+                #self.after_epoch()
             #self.strip_model()
         except Exception as _:
             logger.error('ERROR in training loop or eval/save model.')
@@ -38,7 +38,7 @@ class Trainer:
             self.strip_model()
 
     def before_train_loop(self):
-        logger.info(f'Start epoch {self.epoch}')
+        #logger.info(f'Start epoch {self.epoch}')
 
         new_layer = ["extractor", "bilinear"]
         optimizer_grouped_parameters = [
