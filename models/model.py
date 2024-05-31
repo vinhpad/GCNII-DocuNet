@@ -234,11 +234,11 @@ class GCN(nn.Module):
         if labels is not None:
             labels = [torch.tensor(label) for label in labels]
             labels = torch.cat(labels, dim=0).to(logits)
-            labels_node.to(self.device)
+            labels_node = labels_node.to(self.device)
 
             loss = self.loss_fnt(logits.float(), labels.float())
             node_logit = self.node_linear(output_node_hidden_state)
 
-            loss = loss + self.node_loss(node_logit, labels_node)
+            loss = loss + self.node_loss(node_logit.float(), labels_node)
             output = (loss.to(sequence_output),) + output
         return output

@@ -40,7 +40,7 @@ def collate_fn(batch):
         for token_idx, _ in enumerate(batch_token_pos[batch_id]):
             labels_node[batch_id, token_idx + num_mention + num_entity + num_sent] = 4
 
-    labels_node = torch.reshape(labels_node, (batch_size * num_node_graph, 1))[0]
+    labels_node = torch.reshape(labels_node, (1, batch_size * num_node_graph))[0]
 
     output = (input_ids, input_mask,
               batch_entity_pos,
