@@ -59,5 +59,5 @@ class GNN(nn.Module):
 
         output_node_hidden_state = torch.reshape(output_node_hidden_state, (batch_size, num_node, -1))
         entity_hidden_state = output_node_hidden_state[:, num_mention:num_mention + num_entity]
-        # output_node_hidden_state = torch.reshape(output_node_hidden_state, (batch_size * num_node, -1))
-        return entity_hidden_state
+        output_node_hidden_state = torch.reshape(output_node_hidden_state, (batch_size * num_node, -1))
+        return output_node_hidden_state, entity_hidden_state
