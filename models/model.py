@@ -209,14 +209,14 @@ class GCN(nn.Module):
         return virtual_embed
 
     def forward(self, input_ids, attention_mask,
-                entity_pos, sent_pos, tokens_pos,
+                entity_pos, sent_pos, token_pos,
                 graph, num_mention, num_entity, num_sent, num_token,
                 labels=None, labels_node=None, hts=None):
         sequence_output, attention = self.encode(input_ids, attention_mask)
         mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
         entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
         sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
-        token_embed = self.get_token_embed(sequence_output, tokens_pos, num_token)
+        token_embed = self.get_token_embed(sequence_output, token_pos, num_token)
 
         output_node_hidden_state, entity_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, token_embed, graph])
         local_context = self.get_rss(sequence_output, attention, entity_pos, hts)
