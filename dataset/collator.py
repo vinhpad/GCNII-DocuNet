@@ -45,7 +45,7 @@ def collate_fn(batch):
     output = (input_ids, input_mask,
               batch_entity_pos,
               batch_sent_pos,
-              batch_virtual_pos,
+              batch_token_pos,
               graph,
               num_mention,
               num_entity,
