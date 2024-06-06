@@ -21,16 +21,15 @@ class Trainer:
         self.test_feature = test_feature
         self.args = args
         self.device = args.device
-        
 
     def train(self):
         try:
             self.before_train_loop()
             for self.epoch in range(self.max_epoch):
-                #self.before_epoch()
+                # self.before_epoch()
                 self.train_one_epoch(self.epoch)
-                #self.after_epoch()
-            #self.strip_model()
+                # self.after_epoch()
+            # self.strip_model()
         except Exception as _:
             logger.error('ERROR in training loop or eval/save model.')
             raise
@@ -38,7 +37,7 @@ class Trainer:
             self.strip_model()
 
     def before_train_loop(self):
-        #logger.info(f'Start epoch {self.epoch}')
+        # logger.info(f'Start epoch {self.epoch}')
 
         new_layer = ["extractor", "bilinear"]
         optimizer_grouped_parameters = [
@@ -46,8 +45,8 @@ class Trainer:
             {"params": [p for n, p in self.model.named_parameters() if any(nd in n for nd in new_layer)], "lr": 1e-4},
         ]
         self.optimizer = AdamW(optimizer_grouped_parameters,
-                          lr=self.args.learning_rate,
-                          eps=self.args.adam_epsilon)
+                               lr=self.args.learning_rate,
+                               eps=self.args.adam_epsilon)
 
         self.model.zero_grad()
 
@@ -66,7 +65,7 @@ class Trainer:
                                                          num_warmup_steps=warmup_steps,
                                                          num_training_steps=total_steps)
 
-        #logger.info("Warmup steps: {}".format(warmup_steps))
+        # logger.info("Warmup steps: {}".format(warmup_steps))
 
     def before_epoch(self):
         self.model.zero_grad()
@@ -77,7 +76,7 @@ class Trainer:
             self.model.train()
             (
                 input_ids, input_mask,
-                batch_entity_pos, batch_sent_pos, batch_virtual_pos, 
+                batch_entity_pos, batch_sent_pos, batch_virtual_pos,
                 graph, num_mention, num_entity, num_sent, num_virtual,
                 labels, labels_node, hts
             ) = batch
@@ -108,14 +107,13 @@ class Trainer:
                 self.optimizer.step()
                 self.scheduler.step()
                 self.model.zero_grad()
-                #num_steps += 1
+                # num_steps += 1
             # wandb.log({"loss": loss.item()}, step=num_steps)
             # if step % 100 == 0:
             #    logger.info(loss)
 
     def strip_model(self):
         torch.save(self.model.state_dict(), os.path.join(self.args.save_path, 'model.pt'))
-
 
     def after_epoch(self):
         self.evaluate()
@@ -144,7 +142,7 @@ class Trainer:
                       'attention_mask': input_mask.to(self.device),
                       'entity_pos': entity_pos,
                       'sent_pos': sent_pos,
-                      'virtual_pos':virtual_pos,
+                      'virtual_pos': virtual_pos,
                       'graph': graph.to(self.device),
                       'num_mention': num_mention,
                       'num_entity': num_entity,

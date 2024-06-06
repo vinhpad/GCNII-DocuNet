@@ -25,7 +25,6 @@ class GraphBuilder:
         mention_to_entity_edges = get_mention_to_entity_edges(num_mention, num_entity, batch_entity_pos)
         entity_to_sentence_edges = get_entity_to_sentence_edges(num_entity, num_sent, batch_sent_pos, batch_entity_pos)
         mention_to_virtual_edges = get_mention_to_virtual_edges(num_mention, num_virtual, batch_entity_pos, batch_virtual_pos)
-        # token like a virtual node
         virtual_to_token_edges = get_virtual_to_token_edges(num_virtual, batch_virtual_pos)
 
 

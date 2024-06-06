@@ -124,6 +124,8 @@ def read_cdr(file_in, tokenizer, max_seq_length=1024) -> List[Any]:
             sents = sents[:max_seq_length - 2]
             input_ids = tokenizer.convert_tokens_to_ids(sents)
             input_ids = tokenizer.build_inputs_with_special_tokens(input_ids)
+            #print(sents)
+            #print(entity_pos)
             if len(hts) > 0:
                 feature = {'input_ids': input_ids,
                            'entity_pos': entity_pos,
