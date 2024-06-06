@@ -70,7 +70,7 @@ class GraphBuilder:
         edge_u, edge_v = virtual_to_token_edges
         for edge_id in range(len(edge_u)):
             u.append(get_new_virtual_id(edge_u[edge_id]))
-            v.append(get_new_virtual_id(edge_v[edge_id]))
+            v.append(get_new_token_id(edge_v[edge_id]))
             if self.create_undirected_edges:
                 v.append(get_new_virtual_id(edge_u[edge_id]))
                 u.append(get_new_token_id(edge_v[edge_id]))
