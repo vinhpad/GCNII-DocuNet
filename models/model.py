@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from models.loss import GCNLoss
 from opt_einsum import contract
 
+
 class GCN(nn.Module):
     def __init__(self, config,
                  # bert_config,
@@ -31,11 +32,6 @@ class GCN(nn.Module):
         self.offset = 1
         self.gnn = GNN(config.gnn, bert_config.hidden_size + config.gnn.node_type_embedding, device)
         self.loss_fnt = GCNLoss()
-
-        # classification
-        # self.sotfmax = nn.Linear(, config.)
-        # self.cross_entropy_loss = nn.CrossEntropyLoss()
-
 
     def process_long_input(self, model, input_ids, attention_mask, start_tokens, end_tokens):
 
@@ -120,7 +116,8 @@ class GCN(nn.Module):
             end_tokens = [config.sep_token_id, config.sep_token_id]
         else:
             raise NotImplementedError()
-        sequence_output, attention = self.process_long_input(self.bert_model, input_ids, attention_mask, start_tokens, end_tokens)
+        sequence_output, attention = self.process_long_input(self.bert_model, input_ids, attention_mask, start_tokens,
+                                                             end_tokens)
         return sequence_output, attention
 
     def get_sent_embed(self, sequence_output, batch_sent_pos, num_sent):
@@ -142,14 +139,17 @@ class GCN(nn.Module):
                     mention_id += 1
         return mention_embed
 
-    def get_entity_embed(self, sequence_output, batch_entity_pos, num_entity):
-        batch_size, _, embed_dim = sequence_output.shape
+    def get_entity_embed(self, mention_hidden_state, batch_entity_pos, num_entity):
+        batch_size, _, embed_dim = mention_hidden_state.shape
         entity_embed = torch.zeros((batch_size, num_entity, embed_dim)).to(self.device)
         for batch_id, entity_pos in enumerate(batch_entity_pos):
+            mention_idx = 0
             for entity_id, ent_pos in enumerate(entity_pos):
                 embeds = []
-                for mention_pos in ent_pos:
-                    embeds.append(sequence_output[batch_id, mention_pos[0] + self.offset])
+                for _ in ent_pos:
+                    embeds.append(mention_hidden_state[batch_id][mention_idx])
+                    mention_idx += 1
+
                 entity_embed[batch_id, entity_id] = torch.logsumexp(torch.stack(embeds, dim=0), dim=0)
         return entity_embed
 
@@ -200,34 +200,42 @@ class GCN(nn.Module):
         t_embed = torch.stack(t_embed, dim=0)
         return s_embed, t_embed
 
-    def get_virtual_embed(self, sequence_output, batch_virtual_pos, num_virtual):
+    def get_virtual_embed(self, sequence_output, batch_virtual_pos, batch_token_pos, num_virtual):
         batch_size, _, embed_dim = sequence_output.shape
         virtual_embed = torch.zeros((batch_size, num_virtual, embed_dim)).to(self.device)
         for batch_id, virtual_pos in enumerate(batch_virtual_pos):
-            for virtual_id, vir_pos in enumerate(virtual_pos):
-                #if vir_pos[0] == vir_pos[1]:
-                virtual_embed[batch_id][virtual_id] = sequence_output[batch_id][vir_pos[0] + self.offset]
-                #else:
-                #    embeds = []
-                #    for virtual_id2, token in enumerate(virtual_pos):
-                #        if vir_pos[0] <= token[0] < vir_pos[1]:
-                #            embeds.append(sequence_output[batch_id][token[0] + self.offset])
-                #    virtual_embed[batch_id][virtual_id] = torch.logsumexp(torch.stack(embeds, dim=0), dim=0)
+            for virtual_id, _ in enumerate(virtual_pos):
+                embeds = []
+                for token_pos in batch_token_pos[batch_id][virtual_id]:
+                    embeds.append(sequence_output[batch_id][token_pos + self.offset])
+                virtual_embed[batch_id][virtual_id] = torch.logsumexp(torch.stack(embeds, dim=0), dim=0)
         return virtual_embed
 
+    def get_token_embed(self, sequence_output, batch_token_pos, num_token):
+        batch_size, _, embed_dim = sequence_output.shape
+        token_embed = torch.zeros(batch_size, num_token, embed_dim).to(self.device)
+        for batch_id, token_ranges in enumerate(batch_token_pos):
+            token_idx = 0
+            for token_pos in token_ranges:
+                for token in token_pos:
+                    token_embed[batch_id][token_idx] = sequence_output[batch_id][token + self.offset]
+                    token_idx += 1
+        return token_embed
 
     def forward(self, input_ids, attention_mask,
-                entity_pos, sent_pos, virtual_pos,
-                graph, num_mention, num_entity, num_sent, num_virtual,
-                labels=None, labels_node=None, hts=None):
+                entity_pos, sent_pos, virtual_pos, token_pos,
+                graph, num_mention, num_entity, num_sent, num_virtual, num_token,
+                labels=None, hts=None):
         sequence_output, attention = self.encode(input_ids, attention_mask)
         mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
-        entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
         sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
-        virtual_embed = self.get_virtual_embed(sequence_output, virtual_pos, num_virtual)
+        virtual_embed = self.get_virtual_embed(sequence_output, virtual_pos, token_pos, num_virtual)
+        token_embed = self.get_token_embed(sequence_output, token_pos, num_token)
 
-        entity_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph])
+        mention_hidden_state = self.gnn([mention_embed, sent_embed, virtual_embed, token_embed, graph])
         local_context = self.get_rss(sequence_output, attention, entity_pos, hts)
+
+        entity_hidden_state = self.get_entity_embed(mention_hidden_state, entity_pos, num_entity)
         s_embed, t_embed = self.get_pair_entity_embed(entity_hidden_state, hts)
 
         s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, local_context], dim=1)))
@@ -238,16 +246,10 @@ class GCN(nn.Module):
         bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
         logits = self.bilinear(bl)
 
-        # node_logits = self.sotfmax(output_node_hiden_state)
-        
         output = (self.loss_fnt.get_label(logits, num_labels=self.num_labels),)
         if labels is not None:
             labels = [torch.tensor(label) for label in labels]
             labels = torch.cat(labels, dim=0).to(logits)
-            # labels_node = labels_node.to(self.device)
-
             loss = self.loss_fnt(logits.float(), labels.float())
-            # loss = loss + self.cross_entropy_loss(node_logits.float(), labels_node)
-
             output = (loss.to(sequence_output),) + output
         return output
