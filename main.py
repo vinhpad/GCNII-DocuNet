@@ -166,7 +166,7 @@ def evaluate(args, model, features, tag="dev"):
 def main():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--data_dir", default='.data/cdr', type=str)
+    parser.add_argument("--data_dir", default='./data/cdr', type=str)
     parser.add_argument("--transformer_type", default=TRANSFORMER_TYPE, type=str)
     parser.add_argument("--model_name", default=MODEL_NAME, type=str)
 
@@ -221,7 +221,7 @@ def main():
                         help="unet_out_dim.")
     parser.add_argument("--down_dim", type=int, default=256,
                         help="down_dim.")
-    parser.add_argument("--channel_type", type=str, default='',
+    parser.add_argument("--channel_type", type=str, default='context-based',
                         help="unet_out_dim.")
     parser.add_argument("--log_dir", type=str, default='',
                         help="log.")
@@ -270,15 +270,27 @@ def main():
     bert_config.cls_token_id = tokenizer.cls_token_id
     bert_config.sep_token_id = tokenizer.sep_token_id
     bert_config.transformer_type = args.transformer_type
+    
 
     bert_model = AutoModel.from_pretrained(
         pretrained_model_name_or_path=args.model_name,
         config=bert_config
     )
     bert_model.resize_token_embeddings(len(tokenizer))
+    gnn_config = {
+        "args": {
+            "num_layers": 4,
+            "drop_out": 0.2,
+            "drop_edge": 0,
+            "lambda": 0.5
+        },
+        "gnn_type": "air_gcnii",
+        "node_type_embedding": 50
+    }
+    
 
     set_seed(args)
-    model = DocREModel(bert_config.model, args, bert_model, num_labels=args.num_labels)
+    model = DocREModel(bert_config, gnn_config, args, bert_model, num_labels=args.num_labels)
     model.to(device)
 
     if args.load_path == "":

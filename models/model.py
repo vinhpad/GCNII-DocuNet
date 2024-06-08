@@ -5,7 +5,7 @@ from models.losses import ATLoss
 from opt_einsum import contract
 from models.GNN import GNN
 from torch import nn
-from attn_unet import AttentionUNet
+from .attn_unet import AttentionUNet
 
 
 def process_long_input(model, input_ids, attention_mask, start_tokens, end_tokens):
@@ -82,16 +82,16 @@ def process_long_input(model, input_ids, attention_mask, start_tokens, end_token
 
 
 class DocREModel(nn.Module):
-    def __init__(self, config, args, model, emb_size=768, block_size=64, num_labels=-1):
+    def __init__(self, bert_config, gnn_config, args, model, emb_size=768, block_size=64, num_labels=-1):
         super().__init__()
-        self.config = config
+        self.bert_config = bert_config
         self.bert_model = model
-        self.hidden_size = config.hidden_size
+        self.hidden_size = bert_config.hidden_size
         self.loss_fnt = ATLoss()
 
-        self.head_extractor = nn.Linear(1 * config.hidden_size + args.unet_out_dim, emb_size)
-        self.tail_extractor = nn.Linear(1 * config.hidden_size + args.unet_out_dim, emb_size)
-        self.binary_linear = nn.Linear(emb_size * block_size, config.num_labels)
+        self.head_extractor = nn.Linear(1 * bert_config.hidden_size + args.unet_out_dim, emb_size)
+        self.tail_extractor = nn.Linear(1 * bert_config.hidden_size + args.unet_out_dim, emb_size)
+        self.binary_linear = nn.Linear(emb_size * block_size, bert_config.num_labels)
 
         self.emb_size = emb_size
         self.block_size = block_size
@@ -100,7 +100,7 @@ class DocREModel(nn.Module):
         self.bert_drop = nn.Dropout(0.6)
         self.unet_in_dim = args.unet_in_dim
         self.unet_out_dim = args.unet_in_dim
-        self.liner = nn.Linear(config.hidden_size, args.unet_in_dim)
+        self.liner = nn.Linear(bert_config.hidden_size, args.unet_in_dim)
         self.min_height = args.max_height
         self.channel_type = args.channel_type
         self.segmentation_net = AttentionUNet(input_channels=args.unet_in_dim,
@@ -108,7 +108,7 @@ class DocREModel(nn.Module):
                                               down_channel=args.down_dim)
 
         self.offset = 1
-        self.gnn = GNN(config.gnn, config.hidden_size + config.gnn.node_type_embedding, args.device)
+        self.gnn = GNN(gnn_config, bert_config.hidden_size + 50, args.device)
 
     def encode(self, input_ids, attention_mask):
         config = self.config
