@@ -1,5 +1,7 @@
 import torch
-from .graph_builder import GraphBuilder
+import random
+import numpy as np
+from graph_builder import *
 
 
 graph_builder = GraphBuilder()
@@ -19,8 +21,6 @@ def collate_fn(batch):
 
     graph, num_mention, num_entity, num_sent, num_virtual = graph_builder.create_graph(batch_entity_pos, batch_sent_pos, batch_virtual_pos)
 
-    labels_node = None
-
     output = (input_ids, input_mask,
               batch_entity_pos, 
               batch_sent_pos,
@@ -31,35 +31,13 @@ def collate_fn(batch):
               num_sent, 
               num_virtual,
               labels,
-              labels_node,
               hts)
     return output
 
-def create_virtual_node(batch_entity_pos):
-    batch_virtual_node = []
 
-    for batch_id, entities_pos in enumerate(batch_entity_pos):
-        virtual_node = []   
-        mentions = []
-        for entity_pos in entities_pos:
-            for mention in entity_pos:
-                mentions.append(mention)
-
-        mentions.sort(key=lambda mention: mention[0])
-        if 0 < mentions[0][0]:
-            virtual_node.append([0, mentions[0][0]])
-        
-        for idx in range(1, len(mentions)):
-            if mentions[idx-1][1] < mentions[idx][0] :
-                virtual_node.append([mentions[idx-1][1],mentions[idx][0]])
-        
-        tokens = []
-        for vir_node in virtual_node:
-            for token_pos in range(vir_node[0], vir_node[1]):
-               tokens.append([token_pos, token_pos]) 
-        for token in tokens:
-            virtual_node.append(token)
-
-        batch_virtual_node.append(virtual_node)
-
-    return batch_virtual_node
+def set_seed(args):
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if args.n_gpu > 0 and torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)

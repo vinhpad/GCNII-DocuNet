@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class GCNLoss(nn.Module):
+
+class ATLoss(nn.Module):
     def __init__(self):
         super().__init__()
 
@@ -39,4 +40,3 @@ class GCNLoss(nn.Module):
         output[mask] = 1.0
         output[:, 0] = (output.sum(1) == 0.).to(logits)
         return output
-

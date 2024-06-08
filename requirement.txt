@@ -1,4 +1,0 @@
-torch==2.3.0
-dgl -f https://data.dgl.ai/wheels/torch-2.3/cu121/repo.html
-transformers==4.21.0
-logger

@@ -25,7 +25,6 @@ class GraphBuilder:
         mention_to_entity_edges = get_mention_to_entity_edges(num_mention, num_entity, batch_entity_pos)
         entity_to_sentence_edges = get_entity_to_sentence_edges(num_entity, num_sent, batch_sent_pos, batch_entity_pos)
         mention_to_virtual_edges = get_mention_to_virtual_edges(num_mention, num_virtual, batch_entity_pos, batch_virtual_pos)
-        # token like a virtual node
         virtual_to_token_edges = get_virtual_to_token_edges(num_virtual, batch_virtual_pos)
 
 
@@ -102,6 +101,35 @@ class GraphBuilder:
             graph = dgl.add_self_loop(graph)
         return graph, num_mention, num_entity, num_sent, num_virtual
 
+
+def create_virtual_node(batch_entity_pos):
+    batch_virtual_node = []
+
+    for batch_id, entities_pos in enumerate(batch_entity_pos):
+        virtual_node = []
+        mentions = []
+        for entity_pos in entities_pos:
+            for mention in entity_pos:
+                mentions.append(mention)
+
+        mentions.sort(key=lambda mention: mention[0])
+        if 0 < mentions[0][0]:
+            virtual_node.append([0, mentions[0][0]])
+
+        for idx in range(1, len(mentions)):
+            if mentions[idx - 1][1] < mentions[idx][0]:
+                virtual_node.append([mentions[idx - 1][1], mentions[idx][0]])
+
+        tokens = []
+        for vir_node in virtual_node:
+            for token_pos in range(vir_node[0], vir_node[1]):
+                tokens.append([token_pos, token_pos])
+        for token in tokens:
+            virtual_node.append(token)
+
+        batch_virtual_node.append(virtual_node)
+
+    return batch_virtual_node
 
 
                     

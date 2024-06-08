@@ -1,4 +1,4 @@
-DATA_DIR = './data'
+DATA_DIR = './data/cdr'
 TRANSFORMER_TYPE = 'bert'
 MODEL_NAME = 'microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext'
 TRAIN_FILE = 'train_filter.data'
