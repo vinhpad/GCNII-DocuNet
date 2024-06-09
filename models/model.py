@@ -88,9 +88,10 @@ class DocREModel(nn.Module):
         self.bert_model = model
         self.hidden_size = bert_config.hidden_size
         self.loss_fnt = ATLoss()
+        self.device = args.device
 
-        self.head_extractor = nn.Linear(1 * bert_config.hidden_size + args.unet_out_dim, emb_size)
-        self.tail_extractor = nn.Linear(1 * bert_config.hidden_size + args.unet_out_dim, emb_size)
+        self.head_extractor = nn.Linear(1 * bert_config.hidden_size + gnn_config.node_type_embedding + args.unet_out_dim, emb_size)
+        self.tail_extractor = nn.Linear(1 * bert_config.hidden_size + gnn_config.node_type_embedding + args.unet_out_dim, emb_size)
         self.binary_linear = nn.Linear(emb_size * block_size, bert_config.num_labels)
 
         self.emb_size = emb_size
@@ -108,10 +109,10 @@ class DocREModel(nn.Module):
                                               down_channel=args.down_dim)
 
         self.offset = 1
-        self.gnn = GNN(gnn_config, bert_config.hidden_size + 50, args.device)
+        self.gnn = GNN(gnn_config, bert_config.hidden_size + gnn_config.node_type_embedding, args.device)
 
     def encode(self, input_ids, attention_mask):
-        config = self.config
+        config = self.bert_config
         if config.transformer_type == "bert":
             start_tokens = [config.cls_token_id]
             end_tokens = [config.sep_token_id]
@@ -152,56 +153,16 @@ class DocREModel(nn.Module):
                 entity_embed[batch_id, entity_id] = torch.logsumexp(torch.stack(embeds, dim=0), dim=0)
         return entity_embed
 
-    def get_hrt(self, attention, entity_pos, hts):
-        offset = 1 if self.config.transformer_type in ["bert", "roberta"] else 0
-        bs, h, _, c = attention.size()
+    def get_pair_entity_embed(self, entity_hidden_state, hts):
+        s_embed, t_embed = [], []
+        for batch_id, ht in enumerate(hts):
+            for pair in ht:
+                s_embed.append(entity_hidden_state[batch_id, pair[0]])
+                t_embed.append(entity_hidden_state[batch_id, pair[1]])
+        s_embed = torch.stack(s_embed, dim=0)
+        t_embed = torch.stack(t_embed, dim=0)
+        return s_embed, t_embed
 
-        hss, tss, rss = [], [], []
-        entity_es = []
-        entity_as = []
-        for i in range(len(entity_pos)):
-            entity_embs, entity_atts = [], []
-            for entity_num, e in enumerate(entity_pos[i]):
-                if len(e) > 1:
-                    e_emb, e_att = [], []
-                    for start, end in e:
-                        if start + offset < c:
-                            # In case the entity mention is truncated due to limited max seq length.
-                            #e_emb.append(sequence_output[i, start + offset])
-                            e_att.append(attention[i, :, start + offset])
-                    if len(e_emb) > 0:
-                        #e_emb = torch.logsumexp(torch.stack(e_emb, dim=0), dim=0)
-                        e_att = torch.stack(e_att, dim=0).mean(0)
-                    else:
-                        #e_emb = torch.zeros(self.config.hidden_size).to(sequence_output)
-                        e_att = torch.zeros(h, c).to(attention)
-                else:
-                    start, end = e[0]
-                    if start + offset < c:
-                        #e_emb = sequence_output[i, start + offset]
-                        e_att = attention[i, :, start + offset]
-                    else:
-                        #e_emb = torch.zeros(self.config.hidden_size).to(sequence_output)
-                        e_att = torch.zeros(h, c).to(attention)
-                entity_embs.append(e_emb)
-                entity_atts.append(e_att)
-            for _ in range(self.min_height - entity_num - 1):
-                entity_atts.append(e_att)
-
-            entity_embs = torch.stack(entity_embs, dim=0)  # [n_e, d]
-            entity_atts = torch.stack(entity_atts, dim=0)  # [n_e, h, seq_len]
-
-            entity_es.append(entity_embs)
-            entity_as.append(entity_atts)
-            #ht_i = torch.LongTensor(hts[i]).to(sequence_output.device)
-            #hs = torch.index_select(entity_embs, 0, ht_i[:, 0])
-            #ts = torch.index_select(entity_embs, 0, ht_i[:, 1])
-
-            #hss.append(hs)
-            #tss.append(ts)
-        #hss = torch.cat(hss, dim=0)
-        #tss = torch.cat(tss, dim=0)
-        return entity_as
 
     def get_virtual_embed(self, sequence_output, batch_virtual_pos, num_virtual):
         batch_size, _, embed_dim = sequence_output.shape
@@ -212,7 +173,7 @@ class DocREModel(nn.Module):
                     virtual_embed[batch_id][virtual_id] = sequence_output[batch_id][vir_pos[0] + self.offset]
                 else:
                     embeds = []
-                    for virtual_id2, token_pos in enumerate(virtual_pos):
+                    for _, token_pos in enumerate(virtual_pos):
                         if vir_pos[0] <= token_pos[0] < vir_pos[1]:
                             embeds.append(sequence_output[batch_id][token_pos[0] + self.offset])
 
@@ -228,42 +189,77 @@ class DocREModel(nn.Module):
         htss = torch.stack(htss, dim=0)
         return htss
 
-    def get_rss(self, sequence_output, attention, entity_pos, hts):
+    def get_hrt(self, sequence_output, attention, entity_pos, hts):
         offset = 1 if self.bert_config.transformer_type in ["bert", "roberta"] else 0
-        n, h, _, c = attention.size()
+        bs, h, _, c = attention.size()
         hss, tss, rss = [], [], []
+        entity_es = []
+        entity_as = []
         for i in range(len(entity_pos)):
-            entity_atts = []
-            for e in entity_pos[i]:
+            entity_embs, entity_atts = [], []
+            for entity_num, e in enumerate(entity_pos[i]):
                 if len(e) > 1:
-                    e_att = []
+                    e_emb, e_att = [], []
                     for start, end in e:
                         if start + offset < c:
+                            # In case the entity mention is truncated due to limited max seq length.
+                            e_emb.append(sequence_output[i, start + offset])
                             e_att.append(attention[i, :, start + offset])
-                    if len(e_att) > 0:
+                    if len(e_emb) > 0:
+                        e_emb = torch.logsumexp(torch.stack(e_emb, dim=0), dim=0)
                         e_att = torch.stack(e_att, dim=0).mean(0)
                     else:
+                        e_emb = torch.zeros(self.config.hidden_size).to(sequence_output)
                         e_att = torch.zeros(h, c).to(attention)
                 else:
                     start, end = e[0]
                     if start + offset < c:
+                        e_emb = sequence_output[i, start + offset]
                         e_att = attention[i, :, start + offset]
                     else:
+                        e_emb = torch.zeros(self.config.hidden_size).to(sequence_output)
                         e_att = torch.zeros(h, c).to(attention)
+                entity_embs.append(e_emb)
                 entity_atts.append(e_att)
+            for _ in range(self.min_height-entity_num-1):
+                entity_atts.append(e_att)
+
+            entity_embs = torch.stack(entity_embs, dim=0)  # [n_e, d]
             entity_atts = torch.stack(entity_atts, dim=0)  # [n_e, h, seq_len]
 
-            ht_i = torch.LongTensor(hts[i]).to(sequence_output.device)
 
-            h_att = torch.index_select(entity_atts, 0, ht_i[:, 0])
-            t_att = torch.index_select(entity_atts, 0, ht_i[:, 1])
+            entity_es.append(entity_embs)
+            entity_as.append(entity_atts)
+            ht_i = torch.LongTensor(hts[i]).to(sequence_output.device)
+            hs = torch.index_select(entity_embs, 0, ht_i[:, 0])
+            ts = torch.index_select(entity_embs, 0, ht_i[:, 1])
+
+            hss.append(hs)
+            tss.append(ts)
+        hss = torch.cat(hss, dim=0)
+        tss = torch.cat(tss, dim=0)
+        return entity_as
+
+    def get_channel_map(self, sequence_output, entity_as):
+        bs,_,d = sequence_output.size()
+        ne = self.min_height
+
+        index_pair = []
+        for i in range(ne):
+            tmp = torch.cat((torch.ones((ne, 1), dtype=int) * i, torch.arange(0, ne).unsqueeze(1)), dim=-1)
+            index_pair.append(tmp)
+        index_pair = torch.stack(index_pair, dim=0).reshape(-1, 2).to(sequence_output.device)
+        map_rss = []
+        for b in range(bs):
+            entity_atts = entity_as[b]
+            h_att = torch.index_select(entity_atts, 0, index_pair[:, 0])
+            t_att = torch.index_select(entity_atts, 0, index_pair[:, 1])
             ht_att = (h_att * t_att).mean(1)
             ht_att = ht_att / (ht_att.sum(1, keepdim=True) + 1e-5)
-            rs = contract("ld,rl->rd", sequence_output[i], ht_att)
-            rss.append(rs)
-        rss = torch.cat(rss, dim=0)
-        # print(rss.shape)
-        return rss
+            rs = contract("ld,rl->rd", sequence_output[b], ht_att)
+            map_rss.append(rs)
+        map_rss = torch.cat(map_rss, dim=0).reshape(bs, ne, ne, d)
+        return map_rss
 
     def forward(self, input_ids, attention_mask,
                 entity_pos, sent_pos, virtual_pos,
@@ -275,21 +271,20 @@ class DocREModel(nn.Module):
         sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
         virtual_embed = self.get_virtual_embed(sequence_output, virtual_pos, num_virtual)
         entity_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph])
+
+        local_context = self.get_hrt(sequence_output, attention, entity_pos, hts)
         s_embed, t_embed = self.get_pair_entity_embed(entity_hidden_state, hts)
 
-
         if self.channel_type == 'context-based':
-            feature_map = self.get_rss(sequence_output, attention, entity_pos, hts)
-            ##print('feature_map:', feature_map.shape)
+            feature_map = self.get_channel_map(sequence_output, local_context)
             attn_input = self.liner(feature_map).permute(0, 3, 1, 2).contiguous()
         else:
             raise Exception("channel_type must be specify correctly")
 
         attn_map = self.segmentation_net(attn_input)
-        local_context = self.get_ht(attn_map, hts)
-
-        s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, local_context], dim=1)))
-        t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, local_context], dim=1)))
+        h_t = self.get_ht (attn_map, hts)
+        s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t], dim=1)))
+        t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t], dim=1)))
 
         b1 = s_embed.view(-1, self.emb_size // self.block_size, self.block_size)
         b2 = t_embed.view(-1, self.emb_size // self.block_size, self.block_size)

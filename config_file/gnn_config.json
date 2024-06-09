@@ -1,0 +1,39 @@
+{
+    "experiment": "air_gcnii",
+    "experiment_dir": "experiments_cdr",
+    "model": {
+        "classifier": {
+            "drop_out": 0.5,
+            "hidden_layer_dim": 64,
+            "num_classes": 2,
+            "use_hidden_layer": false
+        },
+        "encoder": {
+            "char_embedding_dim": 30,
+            "drop_out": 0,
+            "elmo_dim": 1024,
+            "kernel_size": 5,
+            "lstm_hidden_dim": 300,
+            "lstm_num_layers": 1,
+            "n_filters": 30,
+            "pos_embedding_dim": 10,
+            "use_char": false,
+            "use_pos": false
+        },
+        "gnn": {
+            "args": {
+                "num_layers": 4,
+                "drop_out": 0.2,
+                "drop_edge": 0,
+                "lambda": 0.5
+            },
+            "gnn_type": "air_gcnii",
+            "node_type_embedding": 50
+        },
+        "ner_classifier": {
+            "hidden_dim": 150,
+            "ner_classes": 5
+        },
+        "use_ner": true
+    }
+}
