@@ -153,7 +153,7 @@ def evaluate(args, model, features, tag='test'):
 def main():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--data_dir", default='./data/cdr', type=str)
+    parser.add_argument("--data_dir", default='./dataset/cdr', type=str)
     parser.add_argument("--transformer_type", default=TRANSFORMER_TYPE, type=str)
     parser.add_argument("--model_name", default=MODEL_NAME, type=str)
 
@@ -270,6 +270,7 @@ def main():
     set_seed(args)
     model = DocREModel(bert_config, gnn_config, args, bert_model, num_labels=args.num_labels)
     model.to(device)
+
     if args.load_path == "":
         train(args, model, train_features, dev_features, test_features)
     else:
