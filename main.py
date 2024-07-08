@@ -11,7 +11,7 @@ from config.run_config import RunConfig
 from torch.utils.data import *
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from tqdm import tqdm
-
+from early_stopping import EarlyStopping
 def train(args, model, train_features, dev_features, test_features):
     def finetune(features, optimizer, num_epoch, num_steps):
         best_score = -1
@@ -26,6 +26,8 @@ def train(args, model, train_features, dev_features, test_features):
 
         log_step = 50
         total_loss = 0
+        valid_losses = []
+        early_stopping = EarlyStopping(5)
         for epoch in tqdm(train_iterator):
             start_time = time.time()
             model.zero_grad()
@@ -54,8 +56,11 @@ def train(args, model, train_features, dev_features, test_features):
 
                 outputs = model(**inputs)
                 loss = outputs[0] / args.gradient_accumulation_steps
+                valid_losses.append(loss.item())
                 loss.backward()
                 total_loss += loss.item()
+
+
                 if step % args.gradient_accumulation_steps == 0:
                     if args.max_grad_norm > 0:
                         torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
@@ -70,14 +75,21 @@ def train(args, model, train_features, dev_features, test_features):
                         total_loss = 0
                         start_time = time.time()
 
+
+
                 if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
+                    valid_loss = np.average(valid_losses)
+                    
                     eval_start_time = time.time()
                     dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
                     test_score, test_output = evaluate(args, model, test_features, tag="test")
-                    if test_score > best_score:
-                        best_score = dev_score
-                        if args.save_path != "":
-                            torch.save(model.state_dict(), os.path.join(args.save_path, 'model.pt'))
+
+                    if args.early_stop:
+                        early_stopping(valid_loss, model)
+                        if early_stopping.early_stop:
+                            early_stopping.save_checkpoint(valid_loss, model)
+                            args.load_path = './checkpoint.pt'
+                
         return best_score
      
 
@@ -90,7 +102,7 @@ def train(args, model, train_features, dev_features, test_features):
     ]
 
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
-    num_steps = 0
+    num_steps = 0   
     set_seed(args)
     model.zero_grad()
     best_score = finetune(train_features, optimizer, args.num_train_epochs, num_steps)
@@ -101,6 +113,7 @@ def train(args, model, train_features, dev_features, test_features):
 def evaluate(args, model, features, tag='test'):
     dataloader = DataLoader(features, batch_size=args.test_batch_size, shuffle=False, collate_fn=collate_fn, drop_last=False)
 
+    
     preds, golds = [], []
     for batch in dataloader:
         model.eval()
@@ -222,6 +235,8 @@ def main():
 
     parser.add_argument('--save_path', type=str, default='output')
 
+    parser.add_argument('--early_stop', type=str, default=True)
+
     args = parser.parse_args()
     # Setup device for pytorch
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -271,14 +286,16 @@ def main():
     model = DocREModel(bert_config, gnn_config, args, bert_model, num_labels=args.num_labels)
     model.to(device)
 
-    if args.load_path == "":
+    if args.early_stop:
         train(args, model, train_features, dev_features, test_features)
-    else:
-        model.load_state_dict(torch.load(args.load_path))
-        dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
-        test_score, test_output = evaluate(args, model, test_features, tag="test")
-        print(dev_output)
-        print(test_output)
+        train_features.extend(dev_features)
+        args.early_stop = False
+
+    model.load_state_dict(torch.load(args.load_path))
+    train(args, model, train_features, dev_features, test_features)
+    #dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
+    test_score, test_output = evaluate(args, model, test_features, tag="test")
+    print(test_output)
 if __name__ == '__main__':
     torch.cuda.empty_cache()
     main()
