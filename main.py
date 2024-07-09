@@ -247,7 +247,7 @@ def main():
         ]
     })
 
-    reader = read_cdr
+    reader = read_gda
 
     # config collate path
     train_file = os.path.join(args.data_dir, args.train_file)
