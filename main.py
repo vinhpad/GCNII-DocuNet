@@ -28,7 +28,7 @@ def train(args, model, train_features, dev_features, test_features):
         total_loss = 0
         valid_losses = []
         early_stopping = EarlyStopping(5)
-        for epoch in tqdm(train_iterator):
+        for _ in tqdm(train_iterator):
             start_time = time.time()
             model.zero_grad()
             for step, batch in tqdm(enumerate(train_dataloader)):
@@ -75,24 +75,16 @@ def train(args, model, train_features, dev_features, test_features):
                         total_loss = 0
                         start_time = time.time()
 
-
-
-                if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
-                    valid_loss = np.average(valid_losses)
-                    
-                    eval_start_time = time.time()
-                    dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
-                    test_score, test_output = evaluate(args, model, test_features, tag="test")
-
-                    if args.early_stop:
-                        early_stopping(valid_loss, model)
-                        if early_stopping.early_stop:
-                            early_stopping.save_checkpoint(valid_loss, model)
-                            args.load_path = './checkpoint.pt'
+            if args.early_stop:
+                valid_loss = np.average(valid_losses)
+                early_stopping(valid_loss, model)
+                if early_stopping.early_stop:
+                    early_stopping.save_checkpoint(valid_loss, model)
+                    args.load_path = './checkpoint.pt'
+                    break
                 
         return best_score
-     
-
+    
     extract_layer = ["extractor", "bilinear"]
     bert_layer = ['bert_model']
     optimizer_grouped_parameters = [
@@ -291,7 +283,7 @@ def main():
         train_features.extend(dev_features)
         args.early_stop = False
 
-    model.load_state_dict(torch.load(args.load_path))
+    model.load_state_dict(torch.load('./checkpoint.pt'))
     train(args, model, train_features, dev_features, test_features)
     #dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
     test_score, test_output = evaluate(args, model, test_features, tag="test")
