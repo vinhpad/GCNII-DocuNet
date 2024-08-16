@@ -1,8 +1,8 @@
 import argparse
-import os.path
+import os
 import time
 from collate.collator import *
-from logger import logger
+from logger import logger, set_log_dir
 from transformers import AutoModel, AutoTokenizer, AutoConfig
 from preprocess import *
 from metadata import *
@@ -213,8 +213,10 @@ def main():
                         help="down_dim.")
     parser.add_argument("--channel_type", type=str, default='context-based',
                         help="unet_out_dim.")
-    parser.add_argument("--log_dir", type=str, default='',
-                        help="log.")
+    parser.add_argument("--log_dir", type=str, default='logs', help="log")
+
+    parser.add_argument("--log_name", type=str, default='docre.log')
+
     parser.add_argument("--bert_lr", default=5e-5, type=float,
                         help="The initial learning rate for Adam.")
     parser.add_argument("--max_height", type=int, default=42,
@@ -227,8 +229,7 @@ def main():
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     args.device = device
 
-    print(args)
-
+    set_log_dir()
     # Using SciBert
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     tokenizer.add_special_tokens({
