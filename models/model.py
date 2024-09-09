@@ -89,7 +89,7 @@ class DocREModel(nn.Module):
         self.hidden_size = bert_config.hidden_size
         self.loss_fnt = ATLoss()
         self.device = args.device
-
+        self.tau = 0.4
         self.head_extractor = nn.Linear(1 * bert_config.hidden_size + gnn_config.node_type_embedding + args.unet_out_dim, emb_size)
         self.tail_extractor = nn.Linear(1 * bert_config.hidden_size + gnn_config.node_type_embedding + args.unet_out_dim, emb_size)
         self.binary_linear = nn.Linear(emb_size * block_size, bert_config.num_labels)
@@ -119,6 +119,7 @@ class DocREModel(nn.Module):
         elif config.transformer_type == "roberta":
             start_tokens = [config.cls_token_id]
             end_tokens = [config.sep_token_id, config.sep_token_id]
+
         sequence_output, attention = process_long_input(self.bert_model, input_ids, attention_mask, start_tokens,
                                                         end_tokens)
         return sequence_output, attention
@@ -162,23 +163,8 @@ class DocREModel(nn.Module):
         s_embed = torch.stack(s_embed, dim=0)
         t_embed = torch.stack(t_embed, dim=0)
         return s_embed, t_embed
+    
 
-
-    def get_virtual_embed(self, sequence_output, batch_virtual_pos, num_virtual):
-        batch_size, _, embed_dim = sequence_output.shape
-        virtual_embed = torch.zeros((batch_size, num_virtual, embed_dim)).to(self.device)
-        for batch_id, virtual_pos in enumerate(batch_virtual_pos):
-            for virtual_id, vir_pos in enumerate(virtual_pos):
-                if vir_pos[0] == vir_pos[1]:
-                    virtual_embed[batch_id][virtual_id] = sequence_output[batch_id][vir_pos[0] + self.offset]
-                else:
-                    embeds = []
-                    for _, token_pos in enumerate(virtual_pos):
-                        if vir_pos[0] <= token_pos[0] < vir_pos[1]:
-                            embeds.append(sequence_output[batch_id][token_pos[0] + self.offset])
-
-                    virtual_embed[batch_id][virtual_id] = torch.logsumexp(torch.stack(embeds, dim=0), dim=0)
-        return virtual_embed
 
     def get_ht(self, rel_enco, hts):
         htss = []
@@ -239,6 +225,60 @@ class DocREModel(nn.Module):
         hss = torch.cat(hss, dim=0)
         tss = torch.cat(tss, dim=0)
         return entity_as
+    
+    def sim(self, z1: torch.Tensor, z2: torch.Tensor):
+        z1 = F.normalize(z1)
+        z2 = F.normalize(z2)
+        return torch.mm(z1, z2.t())
+
+    def batched_semi_loss(self, z1: torch.Tensor, z2: torch.Tensor, batch_size: int):
+        device = z1.device
+        
+        num_nodes = z1.size(0)
+        num_batches = (num_nodes - 1) // batch_size + 1
+
+        f = lambda x: torch.exp(x / self.tau)
+        indices = torch.arange(0, num_nodes).to(device)
+        losses = []
+
+        for i in range(num_batches):
+            mask = indices[i * batch_size:(i + 1) * batch_size]
+            refl_sim = f(self.sim(z1[mask], z1))  # [B, N]
+            between_sim = f(self.sim(z1[mask], z2))  # [B, N]
+
+            losses.append(-torch.log(
+                between_sim[:, i * batch_size:(i + 1) * batch_size].diag()
+                / (refl_sim.sum(1) + between_sim.sum(1) - refl_sim[:, i * batch_size:(i + 1) * batch_size].diag())
+            ))
+
+        return torch.cat(losses)
+
+    def grace_loss(self, z1: torch.Tensor, z2: torch.Tensor, mean: bool = True, batch_size: int = 0):
+
+        l1 = self.batched_semi_loss(z1, z2, batch_size)
+        l2 = self.batched_semi_loss(z2, z1, batch_size)
+
+        ret = (l1 + l2) * 0.5
+        ret = ret.mean() if mean else ret.sum()
+        return ret
+    
+    def projection(self, features, 
+                attention_mask, 
+                entity_pos, 
+                sent_pos,
+                graph,
+                num_mention, 
+                num_entity, 
+                num_sent):
+        sequence_output, attention = self.encode(features, attention_mask)
+        batch_size, _, embed_dim = sequence_output.shape
+        mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
+        entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
+        sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
+        entity_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, graph])
+        
+        return sequence_output, attention, entity_hidden_state
+
 
     def get_channel_map(self, sequence_output, entity_as):
         bs,_,d = sequence_output.size()
@@ -261,17 +301,57 @@ class DocREModel(nn.Module):
         map_rss = torch.cat(map_rss, dim=0).reshape(bs, ne, ne, d)
         return map_rss
 
-    def forward(self, input_ids, attention_mask,
-                entity_pos, sent_pos, virtual_pos,
-                graph, num_mention, num_entity, num_sent, num_virtual,
-                labels=None, hts=None):
-        sequence_output, attention = self.encode(input_ids, attention_mask)
-        mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
-        entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
-        sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
-        virtual_embed = self.get_virtual_embed(sequence_output, virtual_pos, num_virtual)
-        entity_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph])
 
+
+    def forward(self, 
+                input_ids, 
+                features_first,
+                features_second,
+                attention_mask,
+                entity_pos, 
+                sent_pos,
+                graph,
+                graph_first,
+                graph_second, 
+                num_mention, 
+                num_entity, 
+                num_sent,
+                labels=None, 
+                hts=None
+            ):
+        
+        sequence_output, attention = self.encode(input_ids, attention_mask)
+        batch_size, _, embed_dim = sequence_output.shape
+
+        # mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
+        # entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
+        # sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
+        # virtual_embed = self.get_virtual_embed(sequence_output, virtual_pos)
+
+        # entity_hidden_state_first = self.gnn([mention_embed, entity_embed, sent_embed, graph_first])
+        # entity_hidden_state_first = torch.reshape(entity_hidden_state_first, batch_size * num_entity)
+
+        # entity_hidden_state_second = self.gnn([mention_embed, entity_embed, sent_embed, graph_second])
+        # entity_hidden_state_second = torch.reshape(entity_hidden_state_second, batch_size * num_entity)
+
+        # entity_hidden_state_second = entity_hidden_state_second[0]
+        # entity_hidden_state =       self.gnn([mention_embed, entity_embed, sent_embed, graph])
+
+        sequence_output, entity_hidden_state, attention = self.projection(
+            input_ids, attention_mask, entity_pos, sent_pos, graph, num_mention, num_entity, num_sent)
+
+        sequence_output_first, entity_hidden_state_first, attention_first = self.projection(
+            features_first, attention_mask, entity_pos, sent_pos, graph_first, num_mention, num_entity, num_sent)
+        
+        #entity_hidden_state_first = torch.reshape(entity_hidden_state_first, (-1, batch_size))
+
+        sequence_output_second, entity_hidden_state_second, attention_second = self.projection(
+            features_second, attention_mask, entity_pos, sent_pos, graph_second, num_mention, num_entity, num_sent)
+        #entity_hidden_state_second = torch.reshape(entity_hidden_state_second, (-1, batch_size))
+        print(entity_hidden_state_first.size())
+        print(num_entity)
+        print(batch_size)
+        print(embed_dim)
         local_context = self.get_hrt(sequence_output, attention, entity_pos, hts)
         s_embed, t_embed = self.get_pair_entity_embed(entity_hidden_state, hts)
 
@@ -295,6 +375,8 @@ class DocREModel(nn.Module):
         if labels is not None:
             labels = [torch.tensor(label) for label in labels]
             labels = torch.cat(labels, dim=0).to(logits)
-            loss = self.loss_fnt(logits.float(), labels.float())
+            grace_loss = self.grace_loss(entity_hidden_state_first, entity_hidden_state_second, True, batch_size).to(logits)
+            loss = self.loss_fnt(logits.float(), labels.float()) +  grace_loss
             output = (loss.to(sequence_output),) + output
+
         return output

@@ -126,7 +126,7 @@ def train_grace(args, model, train_features):
         drop_last=True
     )
 
-    for epoch in tqdm(train_iterator):
+    for epoch in (train_iterator):
         start_time = time.time()
         model.zero_grad()
         for step, batch in tqdm(enumerate(train_dataloader)):
@@ -146,13 +146,25 @@ def train_grace(args, model, train_features):
             ) = batch
             # print(batch)
 
+
+            # print(f'Befor graph {graph}')
+            graph_first, features_first = augmentation(graph, input_ids, 0.2, 0.4)
+            graph_second, features_second = augmentation(graph, input_ids, 0.3, 0.4)
+            # graph_first.to(args.device)
+            # graph_second.to(args.device)
+
             inputs = {
                 'input_ids': input_ids.to(args.device),
+                'features_first' : features_first.to(args.device),
+                'features_second' : features_second.to(args.device),
                 'attention_mask': input_mask.to(args.device),
                 'entity_pos': batch_entity_pos,
                 'sent_pos': batch_sent_pos,
+                
                 # 'virtual_pos': batch_virtual_pos,
                 'graph': graph.to(args.device),
+                'graph_first': graph_first.to(args.device),
+                'graph_second': graph_second.to(args.device),
                 'num_mention': num_mention,
                 'num_entity': num_entity,
                 'num_sent': num_sent,
@@ -161,18 +173,16 @@ def train_grace(args, model, train_features):
                 'hts': hts,
             }
 
-            print(f'Befor graph {graph}')
-            graph_first, features_first = augmentation(graph, input_ids, 0.2, 0.4)
-            graph_second, features_second = augmentation(graph, input_ids, 0.3, 0.4)
-            graph_first.to(args.device)
-            graph_second.to(args.device)
-
-            
+            # print(input_ids)
+            output = model(**inputs)
+            # print(output)
+            # print(output)
+            # print(output)
             # print(input_ids)
             # print(features_first)
             # print(features_second)
-            #graph.transforms.DropEdge(p=0.2)
-            print(f'After drop edge {graph}')
+            # graph.transforms.DropEdge(p=0.2)
+            # print(f'After drop edge {graph}')
             
     
 
