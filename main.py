@@ -2,7 +2,7 @@ import argparse
 import os.path
 import time
 from collate.collator import *
-from logger import logger
+# from logger import logger
 from transformers import AutoModel, AutoTokenizer, AutoConfig
 from preprocess import *
 from metadata import *
@@ -11,13 +11,26 @@ from config.run_config import RunConfig
 from torch.utils.data import *
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from tqdm import tqdm
+from augmentation_graph import augmentation
+
+def set_seed(args):
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
 
 def train(args, model, train_features, dev_features, test_features):
     def finetune(features, optimizer, num_epoch, num_steps):
         best_score = -1
-        train_dataloader = DataLoader(features, batch_size=args.train_batch_size, shuffle=True, collate_fn=collate_fn,
-                                      drop_last=True)
-
+        train_dataloader = DataLoader(
+            features, 
+            batch_size=args.train_batch_size, 
+            shuffle=True, 
+            collate_fn=collate_fn,
+            drop_last=True
+        )
 
         train_iterator = range(int(num_epoch))
         total_steps = int(len(train_dataloader) * num_epoch // args.gradient_accumulation_steps)
@@ -97,6 +110,71 @@ def train(args, model, train_features, dev_features, test_features):
     print(best_score)
     return best_score
 
+def train_grace(args, model, train_features):
+    num_epoch = int(args.num_train_epochs)
+    train_iterator = range(num_epoch)
+    # total_steps = int(len(train_dataloader) * num_epoch // args.gradient_accumulation_steps)
+    # warmup_steps = int(total_steps * args.warmup_ratio)
+    # scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
+
+    log_step = 50
+    train_dataloader = DataLoader(
+        train_features, 
+        batch_size=args.train_batch_size, 
+        shuffle=True, 
+        collate_fn=collate_fn,
+        drop_last=True
+    )
+
+    for epoch in tqdm(train_iterator):
+        start_time = time.time()
+        model.zero_grad()
+        for step, batch in tqdm(enumerate(train_dataloader)):
+            model.train()
+            (
+                input_ids, 
+                input_mask,
+                batch_entity_pos, 
+                batch_sent_pos, 
+                # batch_virtual_pos,
+                graph, 
+                num_mention, 
+                num_entity, 
+                num_sent, 
+                # num_virtual,
+                labels, hts
+            ) = batch
+            # print(batch)
+
+            inputs = {
+                'input_ids': input_ids.to(args.device),
+                'attention_mask': input_mask.to(args.device),
+                'entity_pos': batch_entity_pos,
+                'sent_pos': batch_sent_pos,
+                # 'virtual_pos': batch_virtual_pos,
+                'graph': graph.to(args.device),
+                'num_mention': num_mention,
+                'num_entity': num_entity,
+                'num_sent': num_sent,
+                # 'num_virtual': num_virtual,
+                'labels': labels,
+                'hts': hts,
+            }
+
+            print(f'Befor graph {graph}')
+            graph_first, features_first = augmentation(graph, input_ids, 0.2, 0.4)
+            graph_second, features_second = augmentation(graph, input_ids, 0.3, 0.4)
+            graph_first.to(args.device)
+            graph_second.to(args.device)
+
+            
+            # print(input_ids)
+            # print(features_first)
+            # print(features_second)
+            #graph.transforms.DropEdge(p=0.2)
+            print(f'After drop edge {graph}')
+            
+    
 
 def evaluate(args, model, features, tag='test'):
     dataloader = DataLoader(features, batch_size=args.test_batch_size, shuffle=False, collate_fn=collate_fn, drop_last=False)
@@ -271,14 +349,15 @@ def main():
     model = DocREModel(bert_config, gnn_config, args, bert_model, num_labels=args.num_labels)
     model.to(device)
 
-    if args.load_path == "":
-        train(args, model, train_features, dev_features, test_features)
-    else:
-        model.load_state_dict(torch.load(args.load_path))
-        dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
-        test_score, test_output = evaluate(args, model, test_features, tag="test")
-        print(dev_output)
-        print(test_output)
+    # if args.load_path == "":
+    #     train(args, model, train_features, dev_features, test_features)
+    # else:
+    #     model.load_state_dict(torch.load(args.load_path))
+    #     dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
+    #     test_score, test_output = evaluate(args, model, test_features, tag="test")
+    #     print(dev_output)
+    #     print(test_output)
+    train_grace(args, model, train_features)
 if __name__ == '__main__':
     torch.cuda.empty_cache()
     main()
