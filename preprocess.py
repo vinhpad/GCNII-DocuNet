@@ -373,19 +373,26 @@ def read_gda(file_in, save_file, tokenizer, max_seq_length=1024):
                     sents = [t.split(' ') for t in text.split('|')]
                     new_sents = []
                     sent_map = {}
+                    sent_pos = []
                     i_t = 0
                     for sent in sents:
+                        start_sent = len(new_sents)
+                        new_sents.append('[SENT]')
                         for token in sent:
                             tokens_wordpiece = tokenizer.tokenize(token)
                             for start, end, tpy in list(entity_pos):
                                 if i_t == start:
-                                    tokens_wordpiece = ["*"] + tokens_wordpiece
+                                    tokens_wordpiece = ["[ENTITY]"] + tokens_wordpiece
                                 if i_t + 1 == end:
-                                    tokens_wordpiece = tokens_wordpiece + ["*"]
+                                    tokens_wordpiece = tokens_wordpiece + ["[/ENTITY]"]
                             sent_map[i_t] = len(new_sents)
                             new_sents.extend(tokens_wordpiece)
                             i_t += 1
+
+                        end_sent = len(new_sents)
+                        sent_pos.append((start_sent, end_sent))
                         sent_map[i_t] = len(new_sents)
+                        new_sents.append('[/SENT]')
                     sents = new_sents
 
                     entity_pos = []
@@ -430,7 +437,8 @@ def read_gda(file_in, save_file, tokenizer, max_seq_length=1024):
                             relation[mention["relation"]] = 1
                         relations.append(relation)
                         hts.append([h, t])
-
+                if len(sents) > max_seq_length - 4:
+                    continue
                 maxlen = max(maxlen, len(sents))
                 sents = sents[:max_seq_length - 2]
                 input_ids = tokenizer.convert_tokens_to_ids(sents)
@@ -438,16 +446,13 @@ def read_gda(file_in, save_file, tokenizer, max_seq_length=1024):
 
                 if len(hts) > 0:
                     feature = {'input_ids': input_ids,
-                               'entity_pos': entity_pos,
-                               'labels': relations,
-                               'hts': hts,
-                               'title': pmid,
-                               }
+                            'entity_pos': [[pos for pos in list_pos if pos[1] < len(sents)] for list_pos in entity_pos],
+                            'labels': relations,
+                            'hts': hts,
+                            'title': pmid,
+                            'sent_pos': [pos for pos in sent_pos if pos[1] < len(sents)]
+                            }
                     features.append(feature)
         print("Number of documents: {}.".format(len(features)))
         print("Max document length: {}.".format(maxlen))
-        with open(file=save_file, mode='wb') as fw:
-            pickle.dump(features, fw)
-        print('finish reading {} and save preprocessed data to {}.'.format(file_in, save_file))
-
         return features

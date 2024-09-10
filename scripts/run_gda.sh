@@ -2,7 +2,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 if true; then
 type=context-based
-bs=4
+bs=1
 bl=3e-5
 uls=(2e-5)
 accum=1
@@ -12,7 +12,7 @@ for seed in ${seeds[@]}
   do
   for ul in ${uls[@]}
   do
-  python3 -u  ./train_bio.py --data_dir ./dataset/gda \
+  python3 -u  ./bio_train.py --data_dir ./dataset/gda \
     --max_height 42 \
     --channel_type $type \
     --bert_lr $bl \
