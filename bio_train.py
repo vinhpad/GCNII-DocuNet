@@ -60,8 +60,8 @@ def train(args, model, train_features, dev_features, test_features):
 
 
                 # print(f'Befor graph {graph}')
-                graph_first, features_first = augmentation(graph, input_ids, 0.2, 0.4)
-                graph_second, features_second = augmentation(graph, input_ids, 0.3, 0.4)
+                graph_first, features_first = augmentation(graph, input_ids, 0.0, 0.4)
+                graph_second, features_second = augmentation(graph, input_ids, 0.2, 0.1)
                 inputs = {
                     'input_ids': input_ids.to(args.device),
                     'features_first' : features_first.to(args.device),
@@ -314,23 +314,15 @@ def main():
         config=bert_config
     )
     bert_model.resize_token_embeddings(len(tokenizer))
-    # gnn_config = RunConfig.from_json(args.gnn_config_file)
-    # gnn_config = gnn_config.model.gnn
+
     set_seed(args)
     model = DocREModel(bert_config, args, bert_model)
     
     model.to(device)
 
-    # if args.load_path == "":
     train_features.extend(dev_features)
     train(args, model, train_features, dev_features, test_features)
-    # else:
-    #     model.load_state_dict(torch.load(args.load_path))
-    #     dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
-    #     test_score, test_output = evaluate(args, model, test_features, tag="test")
-    #     print(dev_output)
-    #     print(test_output)
-    # train_grace(args, model, train_features)
+
 if __name__ == '__main__':
     torch.cuda.empty_cache()
     main()
