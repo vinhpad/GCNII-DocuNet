@@ -10,7 +10,7 @@ class GCN(nn.Module):
         super().__init__()
         self.in_feat_dim = in_feat_dim
         self.num_layers = num_layers
-        self.activate = nn.LeakyReLU()
+        self.activate = nn.ReLU()
         self.gcn_layers = nn.ModuleList([GraphConv(in_feat_dim, in_feat_dim, activation=self.activate)
             for _ in range(self.num_layers)])        
 

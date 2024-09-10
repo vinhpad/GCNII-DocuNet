@@ -1,26 +1,9 @@
 import os
-from tqdm import tqdm
-from typing import List, Any
-
-cdr_rel2id = {'1:NR:2': 0, '1:CID:2': 1}
-gda_rel2id = {'1:NR:2': 0, '1:GDA:2': 1}
-
-def chunks(l, n):
-    res = []
-    for i in range(0, len(l), n):
-        assert len(l[i:i + n]) == n
-        res += [l[i:i + n]]
-    return res
-
-
-
-
-
-import os
 import json
 import pickle
 
 from tqdm import tqdm
+from typing import List, Any
 
 with open('meta/rel2id.json', 'r') as docred_label:
     docred_rel2id = json.load(docred_label)
@@ -29,6 +12,12 @@ cdr_rel2id = {'1:NR:2': 0, '1:CID:2': 1}
 
 gda_rel2id = {'1:NR:2': 0, '1:GDA:2': 1}
 
+def chunks(l, n):
+    res = []
+    for i in range(0, len(l), n):
+        assert len(l[i:i + n]) == n
+        res += [l[i:i + n]]
+    return res
 
 class ReadDataset:
     def __init__(self, dataset: str, tokenizer, max_seq_Length: int = 1024,
@@ -453,6 +442,9 @@ def read_gda(file_in, save_file, tokenizer, max_seq_length=1024):
                             'sent_pos': [pos for pos in sent_pos if pos[1] < len(sents)]
                             }
                     features.append(feature)
+        with open(file=save_file, mode='wb') as fw:
+            pickle.dump(features, fw)
+        print('finish reading {} and save preprocessed data to {}.'.format(file_in, save_file))
         print("Number of documents: {}.".format(len(features)))
         print("Max document length: {}.".format(maxlen))
         return features

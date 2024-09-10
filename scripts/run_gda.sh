@@ -2,18 +2,18 @@ export CUDA_VISIBLE_DEVICES=0
 
 if true; then
 type=context-based
-bs=1
+bs=4
 bl=3e-5
-uls=(2e-5)
-accum=1
-seeds=(128 122 111 222 203)
+uls=(4e-4)
+accum=4
+seeds=(666 122 111 222 203)
 
 for seed in ${seeds[@]}
   do
   for ul in ${uls[@]}
   do
   python3 -u  ./bio_train.py --data_dir ./dataset/gda \
-    --max_height 42 \
+    --max_height 35 \
     --channel_type $type \
     --bert_lr $bl \
     --transformer_type bert \
@@ -28,14 +28,15 @@ for seed in ${seeds[@]}
     --learning_rate $ul \
     --max_grad_norm 1.0 \
     --warmup_ratio 0.06 \
-    --num_train_epochs 30 \
+    --num_train_epochs 10 \
     --tau 0.7 \
     --gnn_num_layer 2 \
     --gnn_node_embedding 50 \
+    --evaluation_steps 400 \
     --seed $seed \
     --num_class 2 \
     --save_path output/checkpoints/cdr/train_scibert-lr${bl}_accum${accum}_unet-lr${ul}_bs${bs}.pt \
-    --log_dir output/logs/cdr/train_scibert-lr${bl}_accum${accum}_unet-lr${ul}_bs${bs}.log
+    --log_dir output/logs/gda/train_biobert-lr${bl}_accum${accum}_unet-lr${ul}_bs${bs}.log
   done
 done
 fi

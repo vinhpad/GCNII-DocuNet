@@ -6,12 +6,12 @@ bs=4
 bl=3e-5
 uls=(2e-5)
 accum=1
-seeds=(122 111 222 203)
+seeds=(666 122 111 222 203)
 for seed in ${seeds[@]}
   do
   for ul in ${uls[@]}
   do
-  python3 -u  ./main.py --data_dir ./dataset/cdr \
+  python3 -u  ./bio_train.py --data_dir ./dataset/cdr \
     --max_height 42 \
     --channel_type $type \
     --bert_lr $bl \
@@ -27,9 +27,9 @@ for seed in ${seeds[@]}
     --learning_rate $ul \
     --max_grad_norm 1.0 \
     --warmup_ratio 0.06 \
-    --num_train_epochs 30 \
-    --tau 0.4 \
-    --gnn_num_layer 3 \
+    --num_train_epochs 20 \
+    --tau 0.7 \
+    --gnn_num_layer 2 \
     --gnn_node_embedding 50 \
     --seed $seed \
     --num_class 2 \

@@ -8,7 +8,7 @@ from preprocess import *
 from metadata import *
 from models.model import DocREModel
 from torch.utils.data import *
-from transformers.optimization import AdamW, get_linear_schedule_with_warmup
+from transformers.optimization import AdamW, get_cosine_schedule_with_warmup
 from tqdm import tqdm
 from augmentation_graph import augmentation
 
@@ -19,8 +19,16 @@ def set_seed(args):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-
 def train(args, model, train_features, dev_features, test_features):
+
+    def logging(s, print_=True, log_=True):
+        if print_:
+            print(s)
+        if log_:
+            with open(args.log_dir, 'a+') as f_log:
+                f_log.write(s + '\n')
+
+
     def finetune(features, optimizer, num_epoch, num_steps):
         best_score = -1
         train_dataloader = DataLoader(
@@ -34,7 +42,7 @@ def train(args, model, train_features, dev_features, test_features):
         train_iterator = range(int(num_epoch))
         total_steps = int(len(train_dataloader) * num_epoch // args.gradient_accumulation_steps)
         warmup_steps = int(total_steps * args.warmup_ratio)
-        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
+        scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
 
         log_step = 50
         total_loss = 0
@@ -61,7 +69,8 @@ def train(args, model, train_features, dev_features, test_features):
 
                 # print(f'Befor graph {graph}')
                 graph_first, features_first = augmentation(graph, input_ids, 0.0, 0.4)
-                graph_second, features_second = augmentation(graph, input_ids, 0.2, 0.1)
+                graph_second, features_second = augmentation(graph, input_ids, 0.1, 0.2)
+
                 inputs = {
                     'input_ids': input_ids.to(args.device),
                     'features_first' : features_first.to(args.device),
@@ -94,30 +103,38 @@ def train(args, model, train_features, dev_features, test_features):
                     scheduler.step()
                     model.zero_grad()
                     num_steps += 1
+                    
                     if num_steps % log_step == 0:
                         cur_loss = total_loss / log_step
                         elapsed = time.time() - start_time
+
+                        logging(
+                           '| epoch {:2d} | step {:4d} | min/b {:5.2f} | lr {} | train loss {:5.3f}'.format(
+                               epoch, num_steps, elapsed / 60, scheduler.get_lr(), cur_loss * 1000))
+
                         total_loss = 0
                         start_time = time.time()
 
-                # if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
-                    # eval_start_time = time.time()
-                    # dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
-            test_score, test_output = evaluate(args, model, test_features, tag="test")
-            print(test_output)
-                    # if test_score > best_score:
-                    #     best_score = dev_score
-                    #     if args.save_path != "":
-                    #         torch.save(model.state_dict(), os.path.join(args.save_path, 'model.pt'))
+                if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
+                    eval_start_time = time.time()
+                    dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
+                    test_score, test_output = evaluate(args, model, test_features, tag="test")
+                    logging(
+                        '| epoch {:3d} | time: {:5.2f}s | dev_output:{} | test_output:{}'.format(epoch, time.time() - eval_start_time,
+                                                                                dev_output, test_output))
+
         return best_score
      
 
     extract_layer = ["extractor", "bilinear"]
     bert_layer = ['bert_model']
+    grace_layer = ['gnn']
+  
     optimizer_grouped_parameters = [
         {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in bert_layer)], "lr": args.bert_lr},
         {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in extract_layer)], "lr": 1e-4},
-        {"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in extract_layer + bert_layer)]},
+        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in grace_layer)], "lr": 1e-3},
+        {"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in extract_layer + bert_layer + grace_layer)]},
     ]
 
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
@@ -133,7 +150,7 @@ def evaluate(args, model, features, tag='test'):
     dataloader = DataLoader(features, batch_size=args.test_batch_size, shuffle=False, collate_fn=collate_fn, drop_last=False)
 
     preds, golds = [], []
-    for batch in dataloader:
+    for batch in tqdm(dataloader):
         model.eval()
         (
             input_ids, 
@@ -222,6 +239,7 @@ def main():
     parser.add_argument("--max_seq_length", default=1024, type=int,
                         help="The maximum total input sequence length after tokenization. Sequences longer "
                              "than this will be truncated, sequences shorter will be padded.")
+    # parser.add_argument("--evaluation_steps", default=400, type=int)
 
     parser.add_argument("--train_batch_size", default=4, type=int,
                         help="Batch size for training.")

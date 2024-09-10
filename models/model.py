@@ -106,6 +106,8 @@ class DocREModel(nn.Module):
         self.unet_out_dim = args.unet_in_dim
         self.liner = nn.Linear(bert_config.hidden_size, args.unet_in_dim)
 
+        self.drop_out = nn.Dropout(0.05)
+
         self.min_height = args.max_height
         self.channel_type = args.channel_type
         self.segmentation_net = AttentionUNet(input_channels=args.unet_in_dim,
@@ -339,6 +341,8 @@ class DocREModel(nn.Module):
         entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
         sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
         entity_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, graph])
+        
+        entity_hidden_state = self.drop_out(entity_hidden_state)
 
         entity_hidden_state_aug_first = self.projection(features_first, attention_mask, entity_pos, sent_pos, graph_first, num_mention, num_entity, num_sent)
         entity_hidden_state_aug_second = self.projection(features_second, attention_mask, entity_pos, sent_pos, graph_second, num_mention, num_entity, num_sent)
@@ -359,6 +363,9 @@ class DocREModel(nn.Module):
         b1 = s_embed.view(-1, self.emb_size // self.block_size, self.block_size)
         b2 = t_embed.view(-1, self.emb_size // self.block_size, self.block_size)
         bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
+
+        bl = self.drop_out(bl)
+
         logits = self.binary_linear(bl)
 
         output = (self.loss_fnt.get_label(logits, num_labels=self.num_labels),)
