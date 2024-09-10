@@ -1,11 +1,12 @@
 import torch
 import numpy as np
 import torch.nn.functional as F
+
+from torch import nn
 from models.losses import ATLoss
 from opt_einsum import contract
-from models.GNN import GNN
-from torch import nn
-from .attn_unet import AttentionUNet
+from models.gnn import GNN
+from models.attn_unet import AttentionUNet
 
 
 def process_long_input(model, input_ids, attention_mask, start_tokens, end_tokens):
@@ -82,16 +83,18 @@ def process_long_input(model, input_ids, attention_mask, start_tokens, end_token
 
 
 class DocREModel(nn.Module):
-    def __init__(self, bert_config, gnn_config, args, model, emb_size=768, block_size=64, num_labels=-1):
+    def __init__(self, bert_config, args, model, emb_size=768, block_size=64, num_labels=-1):
         super().__init__()
         self.bert_config = bert_config
         self.bert_model = model
         self.hidden_size = bert_config.hidden_size
         self.loss_fnt = ATLoss()
         self.device = args.device
-        self.tau = 0.4
-        self.head_extractor = nn.Linear(1 * bert_config.hidden_size + gnn_config.node_type_embedding + args.unet_out_dim, emb_size)
-        self.tail_extractor = nn.Linear(1 * bert_config.hidden_size + gnn_config.node_type_embedding + args.unet_out_dim, emb_size)
+        self.tau = args.tau
+        self.gnn_output_dim = 256
+
+        self.head_extractor = nn.Linear(self.gnn_output_dim + args.unet_out_dim, emb_size)
+        self.tail_extractor = nn.Linear(self.gnn_output_dim + args.unet_out_dim, emb_size)
         self.binary_linear = nn.Linear(emb_size * block_size, bert_config.num_labels)
 
         self.emb_size = emb_size
@@ -102,6 +105,7 @@ class DocREModel(nn.Module):
         self.unet_in_dim = args.unet_in_dim
         self.unet_out_dim = args.unet_in_dim
         self.liner = nn.Linear(bert_config.hidden_size, args.unet_in_dim)
+
         self.min_height = args.max_height
         self.channel_type = args.channel_type
         self.segmentation_net = AttentionUNet(input_channels=args.unet_in_dim,
@@ -109,7 +113,14 @@ class DocREModel(nn.Module):
                                               down_channel=args.down_dim)
 
         self.offset = 1
-        self.gnn = GNN(gnn_config, bert_config.hidden_size + gnn_config.node_type_embedding, args.device)
+        
+        self.gnn = GNN(
+            args.gnn_node_embedding,
+            args.gnn_num_layer,
+            bert_config.hidden_size + args.gnn_node_embedding,
+            self.gnn_output_dim,
+            args.device
+        )
 
     def encode(self, input_ids, attention_mask):
         config = self.bert_config
@@ -210,9 +221,8 @@ class DocREModel(nn.Module):
             for _ in range(self.min_height-entity_num-1):
                 entity_atts.append(e_att)
 
-            entity_embs = torch.stack(entity_embs, dim=0)  # [n_e, d]
-            entity_atts = torch.stack(entity_atts, dim=0)  # [n_e, h, seq_len]
-
+            entity_embs = torch.stack(entity_embs, dim=0)
+            entity_atts = torch.stack(entity_atts, dim=0)
 
             entity_es.append(entity_embs)
             entity_as.append(entity_atts)
@@ -277,7 +287,9 @@ class DocREModel(nn.Module):
         sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
         entity_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, graph])
         
-        return sequence_output, attention, entity_hidden_state
+        entity_hidden_state = torch.reshape(entity_hidden_state, (-1, self.gnn_output_dim))
+
+        return entity_hidden_state
 
 
     def get_channel_map(self, sequence_output, entity_as):
@@ -323,35 +335,13 @@ class DocREModel(nn.Module):
         sequence_output, attention = self.encode(input_ids, attention_mask)
         batch_size, _, embed_dim = sequence_output.shape
 
-        # mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
-        # entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
-        # sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
-        # virtual_embed = self.get_virtual_embed(sequence_output, virtual_pos)
+        mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
+        entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
+        sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
+        entity_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, graph])
 
-        # entity_hidden_state_first = self.gnn([mention_embed, entity_embed, sent_embed, graph_first])
-        # entity_hidden_state_first = torch.reshape(entity_hidden_state_first, batch_size * num_entity)
-
-        # entity_hidden_state_second = self.gnn([mention_embed, entity_embed, sent_embed, graph_second])
-        # entity_hidden_state_second = torch.reshape(entity_hidden_state_second, batch_size * num_entity)
-
-        # entity_hidden_state_second = entity_hidden_state_second[0]
-        # entity_hidden_state =       self.gnn([mention_embed, entity_embed, sent_embed, graph])
-
-        sequence_output, entity_hidden_state, attention = self.projection(
-            input_ids, attention_mask, entity_pos, sent_pos, graph, num_mention, num_entity, num_sent)
-
-        sequence_output_first, entity_hidden_state_first, attention_first = self.projection(
-            features_first, attention_mask, entity_pos, sent_pos, graph_first, num_mention, num_entity, num_sent)
-        
-        #entity_hidden_state_first = torch.reshape(entity_hidden_state_first, (-1, batch_size))
-
-        sequence_output_second, entity_hidden_state_second, attention_second = self.projection(
-            features_second, attention_mask, entity_pos, sent_pos, graph_second, num_mention, num_entity, num_sent)
-        #entity_hidden_state_second = torch.reshape(entity_hidden_state_second, (-1, batch_size))
-        print(entity_hidden_state_first.size())
-        print(num_entity)
-        print(batch_size)
-        print(embed_dim)
+        entity_hidden_state_aug_first = self.projection(features_first, attention_mask, entity_pos, sent_pos, graph_first, num_mention, num_entity, num_sent)
+        entity_hidden_state_aug_second = self.projection(features_second, attention_mask, entity_pos, sent_pos, graph_second, num_mention, num_entity, num_sent)
         local_context = self.get_hrt(sequence_output, attention, entity_pos, hts)
         s_embed, t_embed = self.get_pair_entity_embed(entity_hidden_state, hts)
 
@@ -375,7 +365,7 @@ class DocREModel(nn.Module):
         if labels is not None:
             labels = [torch.tensor(label) for label in labels]
             labels = torch.cat(labels, dim=0).to(logits)
-            grace_loss = self.grace_loss(entity_hidden_state_first, entity_hidden_state_second, True, batch_size).to(logits)
+            grace_loss = self.grace_loss(entity_hidden_state_aug_first, entity_hidden_state_aug_second, True, batch_size).to(logits)
             loss = self.loss_fnt(logits.float(), labels.float()) +  grace_loss
             output = (loss.to(sequence_output),) + output
 
