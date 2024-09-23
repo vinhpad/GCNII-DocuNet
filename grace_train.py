@@ -61,14 +61,16 @@ def train(args, model, features):
                 input_mask,
                 batch_entity_pos, 
                 batch_sent_pos, 
+                # batch_virtual_pos,
                 graph, 
                 num_mention, 
                 num_entity, 
-                num_sent
+                num_sent, 
+                # num_virtual,
+                labels, hts
             ) = batch
-            print(batch)
             
-            graph_first, features_first = augmentation(graph, input_ids, 0.0, 0.4)
+            graph_first, features_first = augmentation(graph, input_ids, 0.1, 0.4)
 
             inputs_first = {                
                 'features' : features_first.to(args.device),
@@ -148,7 +150,7 @@ def main():
                         help="The maximum total input sequence length after tokenization. Sequences longer "
                              "than this will be truncated, sequences shorter will be padded.")
 
-    parser.add_argument("--train_batch_size", default=4, type=int,
+    parser.add_argument("--train_batch_size", default=1, type=int,
                         help="Batch size for training.")
 
     parser.add_argument("--test_batch_size", default=8, type=int,
@@ -199,7 +201,7 @@ def main():
 
     parser.add_argument("--grace_projection_hidden_feat_dim", type=int, default=256)
     parser.add_argument("--grace_projection_out_feat_dim", type=int, default=128)
-    parser.add_argument("--tau", type=float, default=0.4)
+    parser.add_argument("--tau", type=float, default=0.7)
     
     # parser.add_argument('--save_path', type=str, default='output')
 
