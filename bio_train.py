@@ -3,12 +3,13 @@ import os.path
 import time
 from collate.collator import *
 
-from transformers import AutoModel, AutoTokenizer, AutoConfig
 from preprocess import *
-from metadata import *
+from transformers import AutoModel, AutoTokenizer, AutoConfig
+
 from models.model import DocREModel
 from torch.utils.data import *
-from transformers.optimization import AdamW, get_cosine_schedule_with_warmup
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import get_cosine_schedule_with_warmup
 from tqdm import tqdm
 from augmentation_graph import augmentation
 
@@ -219,12 +220,12 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--data_dir", default='./dataset/cdr', type=str)
-    parser.add_argument("--transformer_type", default=TRANSFORMER_TYPE, type=str)
-    parser.add_argument("--model_name", default=MODEL_NAME, type=str)
+    parser.add_argument("--transformer_type", default='', type=str)
+    parser.add_argument("--model_name", default='', type=str)
 
-    parser.add_argument("--train_file", default=TRAIN_FILE, type=str)
-    parser.add_argument("--dev_file", default=DEV_FILE, type=str)
-    parser.add_argument("--test_file", default=TEST_FILE, type=str)
+    parser.add_argument("--train_file", default='', type=str)
+    parser.add_argument("--dev_file", default='', type=str)
+    parser.add_argument("--test_file", default='', type=str)
     parser.add_argument("--load_path", default="", type=str)
 
     parser.add_argument("--gnn_config_file", default="config_file/gnn_config.json", type=str,

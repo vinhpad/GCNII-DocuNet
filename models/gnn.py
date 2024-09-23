@@ -3,17 +3,21 @@ import torch
 
 from torch import nn, Tensor
 from dgl.nn.pytorch import GraphConv
-from dgl.transforms import remove_self_loop, add_self_loop
 
 class GCN(nn.Module):
-    def __init__(self, in_feat_dim: int, num_layers: int):
+    def __init__(self, in_feat_dim: int, hidden_feat_dim: int, out_feat_dim: int, num_layers: int):
         super().__init__()
         self.in_feat_dim = in_feat_dim
         self.num_layers = num_layers
         self.activate = nn.ReLU()
-        self.gcn_layers = nn.ModuleList([GraphConv(in_feat_dim, in_feat_dim, activation=self.activate)
-            for _ in range(self.num_layers)])        
 
+        self.gcn_layers = nn.ModuleList([GraphConv(in_feat_dim, hidden_feat_dim, activation=self.activate)])      
+        
+        for _ in range(1,num_layers):
+            self.gcn_layers.append(GraphConv(hidden_feat_dim, hidden_feat_dim, activation=self.activate))
+
+        self.gcn_layers.append(GraphConv(hidden_feat_dim, out_feat_dim, activation=self.activate))
+ 
     def forward(self, g: dgl.DGLGraph, in_feat: Tensor):
         with g.local_scope():
             x = in_feat
@@ -23,12 +27,15 @@ class GCN(nn.Module):
 
 
 class GNN(nn.Module):
-    def __init__(self, node_type_embedding, num_layers, in_feat_dim: int, out_feat_dim, device: torch.device):
+    def __init__(self, node_type_embedding, num_layers, in_feat_dim: int, hidden_feat_dim: int, out_feat_dim: int, device: torch.device):
+        
         super().__init__()
         self.node_type_embedding = nn.Embedding(3, node_type_embedding)
-        self.gcn = GCN(in_feat_dim, num_layers)
+
+        self.gcn = GCN(in_feat_dim, hidden_feat_dim, out_feat_dim, num_layers)
+
         self.layer_norm = nn.LayerNorm(in_feat_dim)
-        self.fc = nn.Linear(in_feat_dim, out_feat_dim)
+
         self.device = device
 
     def forward(self, inputs):
@@ -61,9 +68,9 @@ class GNN(nn.Module):
         num_node = int(node_hidden_state.shape[1])
         node_hidden_state = torch.reshape(node_hidden_state, (batch_size * num_node, -1))
 
-        output_node_hidden_state = self.fc(self.gcn(graph, node_hidden_state))
+        output_node_hidden_state = self.gcn(graph, node_hidden_state)
 
         output_node_hidden_state = torch.reshape(output_node_hidden_state, (batch_size, num_node, -1))
         entity_hidden_state = output_node_hidden_state[:, num_mention:num_mention + num_entity]
       
-        return entity_hidden_state
+        return entity_hidden_state, output_node_hidden_state
