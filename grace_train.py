@@ -65,8 +65,25 @@ def grace_train(args, model, features):
             graph_first, features_first = augmentation(graph, input_ids, args.feature_prob_first, args.edge_prob_first)
             graph_second, features_second = augmentation(graph, input_ids, args.feature_prob_second, args.edge_prob_second)
 
-            outputs_first = model(features_first, input_mask, batch_entity_pos, batch_sent_pos, graph_first, num_mention, num_entity, num_sent, )
-            outputs_second = model(features_second, input_mask, batch_entity_pos, batch_sent_pos, graph_second, num_mention, num_entity, num_sent)
+            outputs_first = model(
+                features_first.to(args.device), 
+                input_mask.to(args.device), 
+                batch_entity_pos, 
+                batch_sent_pos, 
+                graph_first.to(device), 
+                num_mention, 
+                num_entity, 
+                num_sent)
+            
+            outputs_second = model(
+                features_second.to(args.device), 
+                input_mask.to(args.device), 
+                batch_entity_pos, 
+                batch_sent_pos, 
+                graph_second.to(device), 
+                num_mention, 
+                num_entity, 
+                num_sent)
             
             loss = model.grace_loss(outputs_first, outputs_second)
             loss.backward()
