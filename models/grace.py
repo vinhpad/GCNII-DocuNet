@@ -68,7 +68,7 @@ class GRACE(nn.Module):
 
     def get_mention_embed(self, sequence_output, batch_entity_pos, num_mention):
         batch_size, _, embed_dim = sequence_output.shape
-        print(num_mention)
+        # print(num_mention)
         mention_embed = torch.zeros((batch_size, num_mention, embed_dim)).to(self.device)
         for batch_id, entity_pos in enumerate(batch_entity_pos):
             mention_id = 0

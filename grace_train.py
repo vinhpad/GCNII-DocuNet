@@ -70,7 +70,7 @@ def grace_train(args, model, features):
                 input_mask.to(args.device), 
                 batch_entity_pos, 
                 batch_sent_pos, 
-                graph_first.to(device), 
+                graph_first.to(args.device), 
                 num_mention, 
                 num_entity, 
                 num_sent)
@@ -80,7 +80,7 @@ def grace_train(args, model, features):
                 input_mask.to(args.device), 
                 batch_entity_pos, 
                 batch_sent_pos, 
-                graph_second.to(device), 
+                graph_second.to(args.device), 
                 num_mention, 
                 num_entity, 
                 num_sent)
