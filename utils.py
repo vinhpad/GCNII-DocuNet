@@ -2,14 +2,14 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 
-def process_long_input(model, input_ids, attention_mask, start_tokens, end_tokens):
+def process_long_input(encode_model, input_ids, attention_mask, start_tokens, end_tokens):
     n, c = input_ids.size()
     start_tokens = torch.tensor(start_tokens).to(input_ids)
     end_tokens = torch.tensor(end_tokens).to(input_ids)
     len_start = start_tokens.size(0)
     len_end = end_tokens.size(0)
     if c <= 512:
-        output = model(
+        output = encode_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             output_attentions=True,
@@ -34,7 +34,7 @@ def process_long_input(model, input_ids, attention_mask, start_tokens, end_token
                 num_seg.append(2)
         input_ids = torch.stack(new_input_ids, dim=0)
         attention_mask = torch.stack(new_attention_mask, dim=0)
-        output = model(
+        output = encode_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             output_attentions=True,

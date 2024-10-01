@@ -13,7 +13,7 @@ class GCN(nn.Module):
 
         self.gcn_layers = nn.ModuleList([GraphConv(in_feat_dim, hidden_feat_dim, activation=self.activate)])      
         
-        for _ in range(1,num_layers):
+        for _ in range(1,num_layers -1):
             self.gcn_layers.append(GraphConv(hidden_feat_dim, hidden_feat_dim, activation=self.activate))
 
         self.gcn_layers.append(GraphConv(hidden_feat_dim, out_feat_dim, activation=self.activate))
@@ -63,7 +63,7 @@ class GNN(nn.Module):
         sent_hidden_state = torch.concat((sent_hidden_state, sent_type_embedding), dim=2)
         
         node_hidden_state = torch.concat((mention_hidden_state, entity_hidden_state, sent_hidden_state), dim=1)
-        node_hidden_state = self.layer_norm(node_hidden_state)  # Try out
+        # node_hidden_state = self.layer_norm(node_hidden_state)  # Try out
 
         num_node = int(node_hidden_state.shape[1])
         node_hidden_state = torch.reshape(node_hidden_state, (batch_size * num_node, -1))

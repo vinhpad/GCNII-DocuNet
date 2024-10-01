@@ -14,14 +14,11 @@ class GRACE(nn.Module):
     def __init__(self, config, bert_model):
         super().__init__()
         
-        
         self.bert_model = bert_model
         self.bert_config = config.bert_config
         self.device = config.device
         self.tau = config.tau
-                
         self.offset = 1
-
         self.gnn_in_feat_dim = config.bert_hidden_dim + config.gnn_node_type_embedding
         self.gnn = GNN(
             node_type_embedding=config.gnn_node_type_embedding,
@@ -46,7 +43,7 @@ class GRACE(nn.Module):
             start_tokens = [config.cls_token_id]
             end_tokens = [config.sep_token_id, config.sep_token_id]
 
-        sequence_output, attention = process_long_input(
+        sequence_output, _ = process_long_input(
             self.bert_model, 
             input_ids, 
             attention_mask, 
@@ -57,7 +54,7 @@ class GRACE(nn.Module):
         mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
         entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
         sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
-        entity_hidden_state, node_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, graph])
+        _, node_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, graph])
 
         return node_hidden_state
 
@@ -71,6 +68,7 @@ class GRACE(nn.Module):
 
     def get_mention_embed(self, sequence_output, batch_entity_pos, num_mention):
         batch_size, _, embed_dim = sequence_output.shape
+        print(num_mention)
         mention_embed = torch.zeros((batch_size, num_mention, embed_dim)).to(self.device)
         for batch_id, entity_pos in enumerate(batch_entity_pos):
             mention_id = 0
@@ -110,37 +108,15 @@ class GRACE(nn.Module):
         ret = ret.mean() if mean else ret.sum()
         return ret
     
-    def projection(
-        self, 
-        features, 
-    ):
-        
+    def projection(self, features):
         features = self.fc1(features)
         features = self.fc2(features)
-
         return features
 
-    def forward(self,  
-        features,
-        attention_mask,
-        entity_pos, 
-        sent_pos,
-        graph,
-        num_mention, 
-        num_entity, 
-        num_sent,
-    ):
+    def forward(self, features, attention_mask, entity_pos, sent_pos, graph, num_mention, num_entity, num_sent):
 
-        features = self.encode(
-            features,
-            attention_mask,
-            entity_pos,
-            sent_pos,
-            num_mention,
-            num_entity,
-            num_sent,
-            graph
-        )
+        features = self.encode(features, attention_mask, entity_pos, 
+                               sent_pos, num_mention, num_entity, num_sent, graph)
 
         features = self.projection(features)
         

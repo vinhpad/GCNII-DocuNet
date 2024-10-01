@@ -3,43 +3,32 @@ import os.path
 import time
 from collate.collator import *
 
-from preprocess import *
-from transformers import AutoModel, AutoTokenizer, AutoConfig
 
+from tqdm import tqdm
+from preprocess import *
+from models.grace import GRACE
+from logger import logger
 from models.model import DocREModel
 from torch.utils.data import *
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import get_cosine_schedule_with_warmup
-from tqdm import tqdm
+from transformers import AutoModel, AutoTokenizer, AutoConfig
 from augmentation_graph import augmentation
 
-def set_seed(args):
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+def set_seed(seeder):
+    random.seed(seeder)
+    np.random.seed(seeder)
+    torch.manual_seed(seeder)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
+        torch.cuda.manual_seed_all(seeder)
+    
+    logger.info(f'System set seeder: {seeder}.')
 
-def train(args, model, train_features, dev_features, test_features):
-
-    def logging(s, print_=True, log_=True):
-        if print_:
-            print(s)
-        if log_:
-            with open(args.log_dir, 'a+') as f_log:
-                f_log.write(s + '\n')
-
+def train(args, grace_model, model, train_features, dev_features, test_features):
 
     def finetune(features, optimizer, num_epoch, num_steps):
-        best_score = -1
-        train_dataloader = DataLoader(
-            features, 
-            batch_size=args.train_batch_size, 
-            shuffle=True, 
-            collate_fn=collate_fn,
-            drop_last=True
-        )
-
+        
+        train_dataloader = DataLoader(features, batch_size=args.train_batch_size, shuffle=True, collate_fn=collate_fn, drop_last=True)
         train_iterator = range(int(num_epoch))
         total_steps = int(len(train_dataloader) * num_epoch // args.gradient_accumulation_steps)
         warmup_steps = int(total_steps * args.warmup_ratio)
@@ -57,46 +46,40 @@ def train(args, model, train_features, dev_features, test_features):
                     input_mask,
                     batch_entity_pos, 
                     batch_sent_pos, 
-                    # batch_virtual_pos,
                     graph, 
                     num_mention, 
                     num_entity, 
                     num_sent, 
-                    # num_virtual,
-                    labels, hts
+                    labels, 
+                    hts
                 ) = batch
-                # print(batch)
 
+                features = grace_model(
+                    features = input_ids.to(args.device),
+                    attention_mask = input_mask.to(args.device),
+                    entity_pos = batch_entity_pos,
+                    sent_pos = batch_sent_pos,
+                    graph = graph.to(args.device),
+                    num_mention = num_mention,
+                    num_entity = num_entity,
+                    num_sent = num_sent
+                )
 
-                # print(f'Befor graph {graph}')
-                graph_first, features_first = augmentation(graph, input_ids, 0.0, 0.4)
-                graph_second, features_second = augmentation(graph, input_ids, 0.1, 0.2)
+                outputs = model(
+                    features,
+                    input_mask.to(args.device),
+                    batch_entity_pos,
+                    num_mention,
+                    num_entity,
+                    labels,
+                    hts
+                )
 
-                inputs = {
-                    'input_ids': input_ids.to(args.device),
-                    'features_first' : features_first.to(args.device),
-                    'features_second' : features_second.to(args.device),
-                    'attention_mask': input_mask.to(args.device),
-                    'entity_pos': batch_entity_pos,
-                    'sent_pos': batch_sent_pos,
-                    
-                    # 'virtual_pos': batch_virtual_pos,
-                    'graph': graph.to(args.device),
-                    'graph_first': graph_first.to(args.device),
-                    'graph_second': graph_second.to(args.device),
-                    'num_mention': num_mention,
-                    'num_entity': num_entity,
-                    'num_sent': num_sent,
-                    # 'num_virtual': num_virtual,
-                    'labels': labels,
-                    'hts': hts,
-                }
-
-                outputs = model(**inputs)
                 loss = outputs[0] / args.gradient_accumulation_steps
                 loss.backward()
                 total_loss += loss.item()
                 if step % args.gradient_accumulation_steps == 0:
+                    
                     if args.max_grad_norm > 0:
                         torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
@@ -109,7 +92,7 @@ def train(args, model, train_features, dev_features, test_features):
                         cur_loss = total_loss / log_step
                         elapsed = time.time() - start_time
 
-                        logging(
+                        logger.info(
                            '| epoch {:2d} | step {:4d} | min/b {:5.2f} | lr {} | train loss {:5.3f}'.format(
                                epoch, num_steps, elapsed / 60, scheduler.get_lr(), cur_loss * 1000))
 
@@ -118,37 +101,38 @@ def train(args, model, train_features, dev_features, test_features):
 
                 if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
                     eval_start_time = time.time()
-                    dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
-                    test_score, test_output = evaluate(args, model, test_features, tag="test")
-                    logging(
+                    _, dev_output = evaluate(args, model, dev_features, tag="dev")
+                    _, test_output = evaluate(args, model, test_features, tag="test")
+                    logger.info(
                         '| epoch {:3d} | time: {:5.2f}s | dev_output:{} | test_output:{}'.format(epoch, time.time() - eval_start_time,
                                                                                 dev_output, test_output))
 
-        return best_score
-     
-
+    set_seed(args) 
     extract_layer = ["extractor", "bilinear"]
     bert_layer = ['bert_model']
-    grace_layer = ['gnn']
-  
+    
     optimizer_grouped_parameters = [
         {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in bert_layer)], "lr": args.bert_lr},
         {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in extract_layer)], "lr": 1e-4},
-        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in grace_layer)], "lr": 1e-3},
-        {"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in extract_layer + bert_layer + grace_layer)]},
+        {"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in extract_layer + bert_layer)]},
     ]
 
-    optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
+    optimizer = AdamW(
+        optimizer_grouped_parameters, 
+        lr=args.learning_rate, 
+        eps=args.adam_epsilon
+    )
+    
     num_steps = 0
-    set_seed(args)
     model.zero_grad()
     best_score = finetune(train_features, optimizer, args.num_train_epochs, num_steps)
     print(best_score)
     return best_score
     
 
-def evaluate(args, model, features, tag='test'):
-    dataloader = DataLoader(features, batch_size=args.test_batch_size, shuffle=False, collate_fn=collate_fn, drop_last=False)
+def evaluate(args, grace_model, model, features, tag='test'):
+    dataloader = DataLoader(features, batch_size=args.test_batch_size, 
+                            shuffle=False, collate_fn=collate_fn, drop_last=False)
 
     preds, golds = [], []
     for batch in tqdm(dataloader):
@@ -158,41 +142,36 @@ def evaluate(args, model, features, tag='test'):
             input_mask,
             batch_entity_pos, 
             batch_sent_pos, 
-            # batch_virtual_pos,
             graph, 
             num_mention, 
             num_entity, 
             num_sent, 
-            # num_virtual,
             labels, 
             hts
         ) = batch
 
-        graph_first, features_first = augmentation(graph, input_ids, 0.2, 0.4)
-        graph_second, features_second = augmentation(graph, input_ids, 0.3, 0.4)
-        inputs = {
-            'input_ids': input_ids.to(args.device),
-            'features_first' : features_first.to(args.device),
-            'features_second' : features_second.to(args.device),
-            'attention_mask': input_mask.to(args.device),
-            'entity_pos': batch_entity_pos,
-            'sent_pos': batch_sent_pos,
-            
-            # 'virtual_pos': batch_virtual_pos,
-            'graph': graph.to(args.device),
-            'graph_first': graph_first.to(args.device),
-            'graph_second': graph_second.to(args.device),
-            'num_mention': num_mention,
-            'num_entity': num_entity,
-            'num_sent': num_sent,
-            # 'num_virtual': num_virtual,
-            'labels': labels,
-            'hts': hts,
-        }
-
-
         with torch.no_grad():
-            output = model(**inputs)
+            features = grace_model(
+                features = input_ids.to(args.device),
+                attention_mask = input_mask.to(args.device),
+                entity_pos = batch_entity_pos,
+                sent_pos = batch_sent_pos,
+                graph = graph.to(args.device),
+                num_mention = num_mention,
+                num_entity = num_entity,
+                num_sent = num_sent
+            )
+
+            output = model(
+                features,
+                input_mask.to(args.device),
+                batch_entity_pos,
+                num_mention,
+                num_entity,
+                labels,
+                hts
+            )
+
             loss = output[0]
             pred = output[1].cpu().numpy()
             pred[np.isnan(pred)] = 0
@@ -240,7 +219,10 @@ def main():
     parser.add_argument("--max_seq_length", default=1024, type=int,
                         help="The maximum total input sequence length after tokenization. Sequences longer "
                              "than this will be truncated, sequences shorter will be padded.")
-    # parser.add_argument("--evaluation_steps", default=400, type=int)
+    
+    parser.add_argument("--evaluation_steps", default=400, type=int)
+
+    parser.add_argument("--grace_mode_path", default="", type=int)
 
     parser.add_argument("--train_batch_size", default=4, type=int,
                         help="Batch size for training.")
@@ -295,7 +277,9 @@ def main():
     args = parser.parse_args()
     # Setup device for pytorch
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
     args.device = device
+    logger.info(f'Using device: {device}!')
 
     # Using SciBert
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
@@ -308,7 +292,7 @@ def main():
         ]
     })
 
-    reader   = read_cdr if "cdr" in args.data_dir else read_gda
+    reader = read_cdr if "cdr" in args.data_dir else read_gda
 
     # config collate path
     train_file = os.path.join(args.data_dir, args.train_file)
@@ -327,21 +311,35 @@ def main():
     bert_config.sep_token_id = tokenizer.sep_token_id
     bert_config.transformer_type = args.transformer_type
     
-
     bert_model = AutoModel.from_pretrained(
         pretrained_model_name_or_path=args.model_name,
         config=bert_config
     )
+
     bert_model.resize_token_embeddings(len(tokenizer))
+    config = args
+    config.bert_config = bert_config
 
     set_seed(args)
-    model = DocREModel(bert_config, args, bert_model)
-    
+    grace_model = GRACE(config, bert_model)
+    model = DocREModel(config, bert_model)
     model.to(device)
+    grace_model.to(device)
 
-    train_features.extend(dev_features)
-    train(args, model, train_features, dev_features, test_features)
-
+    if args.load_path == "":
+        train_features.extend(dev_features)
+        if args.grace_load_path == "":
+            raise Exception('Not found grace pre train model!')
+        else:
+            grace_model.load_state_dict(torch.load(args.grace_load_path))
+        train(args, grace_model, model, train_features, dev_features, test_features)
+        
+    else:       
+        model.load_state_dict(torch.load(args.load_path))
+        logger.info(f'Load state dict checkpoint : {args.load_path}.')
+        _, test_output = evaluate(args, grace_model, model, test_features, tag="test")
+        logger.info(f'Test F1 score : {test_output}.')
+    
 if __name__ == '__main__':
     torch.cuda.empty_cache()
     main()
