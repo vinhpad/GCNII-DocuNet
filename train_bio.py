@@ -2,16 +2,14 @@ import argparse
 import os.path
 import time
 from collate.collator import *
-from logger import logger
 from transformers import AutoModel, AutoTokenizer, AutoConfig
 from preprocess import *
-from metadata import *
 from models.model import DocREModel
 from config.run_config import RunConfig
 from torch.utils.data import *
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from tqdm import tqdm
-
+from logger import logger
 def train(args, model, train_features, dev_features, test_features):
     def finetune(features, optimizer, num_epoch, num_steps):
         best_score = -1
@@ -38,19 +36,20 @@ def train(args, model, train_features, dev_features, test_features):
                     labels, hts
                 ) = batch
 
-                inputs = {'input_ids': input_ids.to(args.device),
-                          'attention_mask': input_mask.to(args.device),
-                          'entity_pos': batch_entity_pos,
-                          'sent_pos': batch_sent_pos,
-                          'virtual_pos': batch_virtual_pos,
-                          'graph': graph.to(args.device),
-                          'num_mention': num_mention,
-                          'num_entity': num_entity,
-                          'num_sent': num_sent,
-                          'num_virtual': num_virtual,
-                          'labels': labels,
-                          'hts': hts,
-                          }
+                inputs = {
+                    'input_ids': input_ids.to(args.device),
+                    'attention_mask': input_mask.to(args.device),
+                    'entity_pos': batch_entity_pos,
+                    'sent_pos': batch_sent_pos,
+                    'virtual_pos': batch_virtual_pos,
+                    'graph': graph.to(args.device),
+                    'num_mention': num_mention,
+                    'num_entity': num_entity,
+                    'num_sent': num_sent,
+                    'num_virtual': num_virtual,
+                    'labels': labels,
+                    'hts': hts,
+                }
 
                 outputs = model(**inputs)
                 loss = outputs[0] / args.gradient_accumulation_steps
@@ -67,17 +66,26 @@ def train(args, model, train_features, dev_features, test_features):
                     if num_steps % log_step == 0:
                         cur_loss = total_loss / log_step
                         elapsed = time.time() - start_time
+
+                        logger.info(
+                           '| epoch {:2d} | step {:4d} | min/b {:5.2f} | lr {} | train loss {:5.3f}'.format(
+                               epoch, num_steps, elapsed / 60, scheduler.get_lr(), cur_loss))
+
                         total_loss = 0
                         start_time = time.time()
 
                 if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
                     eval_start_time = time.time()
-                    dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
+                    # dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
                     test_score, test_output = evaluate(args, model, test_features, tag="test")
-                    if test_score > best_score:
-                        best_score = dev_score
-                        if args.save_path != "":
-                            torch.save(model.state_dict(), os.path.join(args.save_path, 'model.pt'))
+                    logger.info(
+                        '| epoch {:3d} | time: {:5.2f}s | test_output:{}'
+                            .format(epoch, time.time() - eval_start_time, test_output))
+                    # if test_score > best_score:
+                    #     best_score = dev_score
+                    #     if args.save_path != "":
+                         
+                    torch.save(model.state_dict(), args.save_path)
         return best_score
      
 
@@ -154,12 +162,12 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--data_dir", default='./dataset/cdr', type=str)
-    parser.add_argument("--transformer_type", default=TRANSFORMER_TYPE, type=str)
-    parser.add_argument("--model_name", default=MODEL_NAME, type=str)
+    parser.add_argument("--transformer_type", type=str)
+    parser.add_argument("--model_name", type=str)
 
-    parser.add_argument("--train_file", default=TRAIN_FILE, type=str)
-    parser.add_argument("--dev_file", default=DEV_FILE, type=str)
-    parser.add_argument("--test_file", default=TEST_FILE, type=str)
+    parser.add_argument("--train_file", type=str)
+    parser.add_argument("--dev_file", type=str)
+    parser.add_argument("--test_file", type=str)
     parser.add_argument("--load_path", default="", type=str)
 
     parser.add_argument("--gnn_config_file", default="config_file/gnn_config.json", type=str,
@@ -227,9 +235,7 @@ def main():
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     args.device = device
 
-    print(args)
-
-    # Using SciBert
+    # Using BERT
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     tokenizer.add_special_tokens({
         'additional_special_tokens': [
@@ -240,7 +246,7 @@ def main():
         ]
     })
 
-    reader = read_cdr
+    reader = read_gda
 
     # config collate path
     train_file = os.path.join(args.data_dir, args.train_file)
@@ -272,6 +278,7 @@ def main():
     model.to(device)
 
     if args.load_path == "":
+        train_features.extend(dev_features)
         train(args, model, train_features, dev_features, test_features)
     else:
         model.load_state_dict(torch.load(args.load_path))
