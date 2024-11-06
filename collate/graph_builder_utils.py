@@ -1,5 +1,6 @@
 from typing import Tuple, List
 
+
 def get_sentence_to_sentence_edges(num_sent, batch_sent_pos) -> Tuple[List[int], List[int]]:
     u = []
     v = []
@@ -108,6 +109,32 @@ def get_mention_to_virtual_edges(num_mention, num_virtual, batch_entity_pos, bat
 
                 mention_idx = mention_idx + 1
     return u, v
+
+
+def get_virtual_to_token_edges(num_virtual, batch_virtual_pos) -> Tuple[List[int], List[int]]:
+    u = []
+    v = []
+    for batch_id, virtual_pos in enumerate(batch_virtual_pos):
+        for internal_idx_1, _ in enumerate(virtual_pos):
+            for internal_idx_2, _ in enumerate(virtual_pos):
+                # is virtual
+                virtual_left = virtual_pos[internal_idx_1][0]
+                virtual_right = virtual_pos[internal_idx_1][1]
+                if virtual_left == virtual_right:
+                    continue
+
+                # is token
+                token_left = virtual_pos[internal_idx_2][0]
+                token_right = virtual_pos[internal_idx_2][1]
+                if token_left != token_right:
+                    continue
+
+                # is valid
+                if virtual_left <= token_left < virtual_right:
+                    u.append(get_id(num_virtual, batch_id, internal_idx_1))
+                    v.append(get_id(num_virtual, batch_id, internal_idx_2))
+    return u, v
+
 
 def get_id(num_col: int, row_idx: int, col_idx: int) -> int:
     return num_col * row_idx + col_idx

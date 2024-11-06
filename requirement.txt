@@ -1,0 +1,7 @@
+torch==2.3.1 --index-url https://download.pytorch.org/whl/cu118
+dgl -f https://data.dgl.ai/wheels/torch-2.3/cu118/repo.html
+transformers==4.21.0
+opt_einsum
+numpy
+pandas
+pydantic
