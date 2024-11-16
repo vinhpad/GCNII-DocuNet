@@ -28,104 +28,103 @@ def set_seed(seeder):
 def train(args, model, train_features, dev_features, test_features):
 
     def finetune(features, optimizer, num_epoch, num_steps):
-            
-            train_dataloader = DataLoader(features, batch_size=args.train_batch_size, shuffle=True, collate_fn=collate_fn, drop_last=True)
-            train_iterator = range(int(num_epoch))
-            total_steps = int(len(train_dataloader) * num_epoch // args.gradient_accumulation_steps)
-            warmup_steps = int(total_steps * args.warmup_ratio)
-            scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
+        train_dataloader = DataLoader(features, batch_size=args.train_batch_size, shuffle=True, collate_fn=collate_fn, drop_last=True)
+        train_iterator = range(int(num_epoch))
+        total_steps = int(len(train_dataloader) * num_epoch // args.gradient_accumulation_steps)
+        warmup_steps = int(total_steps * args.warmup_ratio)
+        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
 
-            log_step = 50
-            total_loss = 0
-            total_altop_loss = 0
-            total_grace_loss = 0
-            for epoch in tqdm(train_iterator):
-                start_time = time.time()
-                model.zero_grad()
-                for step, batch in tqdm(enumerate(train_dataloader)):
-                    model.train()
-                    (
-                        input_ids, input_mask,
-                        batch_entity_pos, batch_sent_pos, batch_virtual_pos,
-                        graph, num_mention, num_entity, num_sent, num_virtual,
-                        labels, hts
-                    ) = batch
+        log_step = 50
+        total_loss = 0
+        total_altop_loss = 0
+        total_grace_loss = 0
+        for epoch in tqdm(train_iterator):
+            start_time = time.time()
+            model.zero_grad()
+            for step, batch in tqdm(enumerate(train_dataloader)):
+                model.train()
+                (
+                    input_ids, input_mask,
+                    batch_entity_pos, batch_sent_pos, batch_virtual_pos,
+                    graph, num_mention, num_entity, num_sent, num_virtual,
+                    labels, hts
+                ) = batch
 
-                    inputs = {
-                        'input_ids': input_ids.to(args.device),
-                        'attention_mask': input_mask.to(args.device),
-                        'entity_pos': batch_entity_pos,
-                        'sent_pos': batch_sent_pos,
-                        'virtual_pos': batch_virtual_pos,
-                        'graph': graph.to(args.device),
-                        'num_mention': num_mention,
-                        'num_entity': num_entity,
-                        'num_sent': num_sent,
-                        'num_virtual': num_virtual,
-                        'labels': labels,
-                        'hts': hts,
-                    }
-                    outputs = model(**inputs)
-                    loss = outputs[0] / args.gradient_accumulation_steps
-                    altop_loss = outputs[1] / args.gradient_accumulation_steps
-                    grace_loss = outputs[2] / args.gradient_accumulation_steps
+                inputs = {
+                    'input_ids': input_ids.to(args.device),
+                    'attention_mask': input_mask.to(args.device),
+                    'entity_pos': batch_entity_pos,
+                    'sent_pos': batch_sent_pos,
+                    'virtual_pos': batch_virtual_pos,
+                    'graph': graph.to(args.device),
+                    'num_mention': num_mention,
+                    'num_entity': num_entity,
+                    'num_sent': num_sent,
+                    'num_virtual': num_virtual,
+                    'labels': labels,
+                    'hts': hts,
+                }
+                outputs = model(**inputs)
+                loss = outputs[0] / args.gradient_accumulation_steps
+                altop_loss = outputs[1] / args.gradient_accumulation_steps
+                grace_loss = outputs[2] / args.gradient_accumulation_steps
+                
+                loss.backward()
+                total_loss += loss.item()
+                total_altop_loss += altop_loss.item()
+                total_grace_loss += grace_loss.item()
+                
+                if step % args.gradient_accumulation_steps == 0:
                     
-                    loss.backward()
-                    total_loss += loss.item()
-                    total_altop_loss += altop_loss.item()
-                    total_grace_loss += grace_loss.item()
+                    if args.max_grad_norm > 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+
+                    optimizer.step()
+                    scheduler.step()
+                    model.zero_grad()
+                    num_steps += 1
                     
-                    if step % args.gradient_accumulation_steps == 0:
-                        
-                        if args.max_grad_norm > 0:
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                    if num_steps % log_step == 0:
+                        cur_loss = total_loss / log_step
+                        altop_loss = total_altop_loss / log_step
+                        grace_loss = total_grace_loss / log_step
 
-                        optimizer.step()
-                        scheduler.step()
-                        model.zero_grad()
-                        num_steps += 1
-                        
-                        if num_steps % log_step == 0:
-                            cur_loss = total_loss / log_step
-                            altop_loss = total_altop_loss / log_step
-                            grace_loss = total_grace_loss / log_step
+                        elapsed = time.time() - start_time
 
-                            elapsed = time.time() - start_time
-
-                            logger.info(
-                            '| epoch {:2d} | step {:4d} | min/b {:5.2f} | lr {} | train loss {:5.3f} | altop loss {:5.3f} | grace loss {:5.3f}'.format(
-                                epoch, num_steps, elapsed / 60, scheduler.get_lr(), cur_loss, altop_loss, grace_loss))
-
-                            total_loss = 0
-                            total_altop_loss = 0
-                            total_grace_loss = 0
-                            start_time = time.time()
-
-                    if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
-                        eval_start_time = time.time()
-                        # _, dev_output = evaluate(args, model, dev_features, tag="dev")
-                        _, test_output = evaluate(args, model, test_features, tag="test")
                         logger.info(
-                            '| epoch {:3d} | time: {:5.2f}s | test_output:{}'.format(epoch, time.time() - eval_start_time, test_output))
-                    
-                        # logger.info('| epoch {:3d} | best_f1:{}'.format(epoch, best_score))
-                        
-                if args.save_path != "":
-                    torch.save({
-                        'epoch': epoch,
-                        'checkpoint': model.state_dict(),
-                        # 'best_f1': best_score,
-                        'optimizer': optimizer.state_dict()
-                    }, args.save_path
-                    , _use_new_zipfile_serialization=False)
+                        '| epoch {:2d} | step {:4d} | min/b {:5.2f} | lr {} | train loss {:5.3f} | altop loss {:5.3f} | grace loss {:5.3f}'.format(
+                            epoch, num_steps, elapsed / 60, scheduler.get_lr(), cur_loss, altop_loss, grace_loss))
 
-    cur_model = model.module if hasattr(model, 'module') else model
+                        total_loss = 0
+                        total_altop_loss = 0
+                        total_grace_loss = 0
+                        start_time = time.time()
+
+                if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
+                    eval_start_time = time.time()
+                    # _, dev_output = evaluate(args, model, dev_features, tag="dev")
+                    _, test_output = evaluate(args, model, test_features, tag="test")
+                    logger.info(
+                        '| epoch {:3d} | time: {:5.2f}s | test_output:{}'.format(epoch, time.time() - eval_start_time, test_output))
+                
+                    # logger.info('| epoch {:3d} | best_f1:{}'.format(epoch, best_score))
+                    
+            if args.save_path != "":
+                torch.save({
+                    'epoch': epoch,
+                    'checkpoint': model.state_dict(),
+                    # 'best_f1': best_score,
+                    'optimizer': optimizer.state_dict()
+                }, args.save_path
+                , _use_new_zipfile_serialization=False)
+
+
     extract_layer = ["extractor", "bilinear"]
     bert_layer = ['bert_model']
     optimizer_grouped_parameters = [
-        {"params": [p for n, p in cur_model.named_parameters() if any(nd in n for nd in bert_layer)], "lr": args.bert_lr},
-        {"params": [p for n, p in cur_model.named_parameters() if any(nd in n for nd in extract_layer)], "lr": 1e-4},
-        {"params": [p for n, p in cur_model.named_parameters() if not any(nd in n for nd in extract_layer + bert_layer)]},
+        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in bert_layer)], "lr": args.bert_lr},
+        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in extract_layer)], "lr": 1e-4},
+        {"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in extract_layer + bert_layer)]},
     ]
 
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
@@ -140,6 +139,7 @@ def evaluate(args, model, features, tag="dev"):
 
     dataloader = DataLoader(features, batch_size=args.test_batch_size, shuffle=False, collate_fn=collate_fn, drop_last=False)
     preds = []
+    golds = []
     total_loss = 0
     for i, batch in enumerate(dataloader):
         model.eval()
@@ -304,9 +304,8 @@ def main():
     args = parser.parse_args()
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     args.device = device
- 
     setup_log_path(args.log_dir)
-
+    set_seed(args.seed)
     # Using SciBert
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     tokenizer.add_special_tokens({
@@ -322,9 +321,9 @@ def main():
     train_file = os.path.join(args.data_dir, args.train_file)
     dev_file = os.path.join(args.data_dir, args.dev_file)
     test_file = os.path.join(args.data_dir, args.test_file)
-    train_features = read_docred(file_in=train_file, save_file="train.cache", tokenizer=tokenizer, max_seq_length=args.max_seq_length)
-    dev_features = read_docred(file_in=dev_file, save_file="dev.cache", tokenizer=tokenizer, max_seq_length=args.max_seq_length)
-    test_features = read_docred(file_in=test_file, save_file="test.cache",tokenizer=tokenizer, max_seq_length=args.max_seq_length)
+    train_features = read_docred(file_in=train_file, save_file="", tokenizer=tokenizer, max_seq_length=args.max_seq_length)
+    dev_features = read_docred(file_in=dev_file, save_file="", tokenizer=tokenizer, max_seq_length=args.max_seq_length)
+    test_features = read_docred(file_in=test_file, save_file="",tokenizer=tokenizer, max_seq_length=args.max_seq_length)
 
     bert_config = AutoConfig.from_pretrained(
         pretrained_model_name_or_path=args.model_name_or_path,
@@ -340,11 +339,11 @@ def main():
         from_tf=bool(".ckpt" in args.model_name_or_path),
         config=bert_config,
     )
+    bert_model.resize_token_embeddings(len(tokenizer))
     args.bert_config = bert_config
-
-    set_seed(args.seed)
     model = DocREModel(args, bert_model, num_labels=args.num_labels)
     model.to(device)
+    
     if args.load_path == "":
         train_features.extend(dev_features)
         train(args, model, train_features, dev_features, test_features)
