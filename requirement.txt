@@ -1,5 +1,5 @@
-torch==2.3
-dgl -f https://data.dgl.ai/wheels/torch-2.3/cu121/repo.html
+torch==2.4
+dgl -f https://data.dgl.ai/wheels/torch-2.4/cu121/repo.html
 transformers
 opt_einsum
 torch_geometric

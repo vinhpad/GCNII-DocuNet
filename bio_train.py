@@ -95,6 +95,8 @@ def train(args, model, train_features, dev_features, test_features):
                                epoch, num_steps, elapsed / 60, scheduler.get_lr(), cur_loss, altop_loss, grace_loss))
 
                         total_loss = 0
+                        total_altop_loss = 0
+                        total_grace_loss = 0
                         start_time = time.time()
 
                 if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
