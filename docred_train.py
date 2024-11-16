@@ -168,7 +168,7 @@ def evaluate(args, model, features, tag="dev"):
         with torch.no_grad():
             output = model(**inputs)
             loss = output[0]
-            pred = output[1].cpu().numpy()
+            pred = output[-1].cpu().numpy()
             pred[np.isnan(pred)] = 0
             preds.append(pred)
             total_loss += loss.item()
@@ -204,7 +204,7 @@ def report(args, model, features):
 
         with torch.no_grad():
             pred = model(**inputs)
-            pred = pred.cpu().numpy()
+            pred = pred[-1].cpu().numpy()
             pred[np.isnan(pred)] = 0
             preds.append(pred)
 
