@@ -1,40 +1,22 @@
-import dgl
 import torch
-
-from torch import nn, Tensor
-from dgl.nn.pytorch import GraphConv
-
-class GCN(nn.Module):
-    def __init__(self, in_feat_dim: int, hidden_feat_dim: int, out_feat_dim: int, num_layers: int):
-        super().__init__()
-        self.in_feat_dim = in_feat_dim
-        self.num_layers = num_layers
-        self.activate = nn.ReLU()
-
-        self.gcn_layers = nn.ModuleList([GraphConv(in_feat_dim, hidden_feat_dim, activation=self.activate)])      
-        
-        for _ in range(1,num_layers -1):
-            self.gcn_layers.append(GraphConv(hidden_feat_dim, hidden_feat_dim, activation=self.activate))
-
-        self.gcn_layers.append(GraphConv(hidden_feat_dim, out_feat_dim, activation=self.activate))
- 
-    def forward(self, g: dgl.DGLGraph, in_feat: Tensor):
-        with g.local_scope():
-            x = in_feat
-            for _, gcn_layer in enumerate(self.gcn_layers):
-                x = gcn_layer(g, x)
-            return x
-
+from torch import nn
+from gcnii.air_gcnii import AIRGCNII
 
 class GNN(nn.Module):
-    def __init__(self, node_type_embedding, num_layers, in_feat_dim: int, hidden_feat_dim: int, out_feat_dim: int, device: torch.device):
+    def __init__(self, num_node_type, node_type_embedding, hidden_feat_dim: int, device: torch.device):
         
         super().__init__()
-        self.node_type_embedding = nn.Embedding(3, node_type_embedding)
+        self.node_type_embedding = nn.Embedding(num_node_type, node_type_embedding)
 
-        self.gcn = GCN(in_feat_dim, hidden_feat_dim, out_feat_dim, num_layers)
+        self.gcn = AIRGCNII(
+            num_hidden=hidden_feat_dim,
+            num_layers=4,
+            drop_out=0.2,
+            drop_edge=0,
+            lambda_=0.5
+        )
 
-        self.layer_norm = nn.LayerNorm(in_feat_dim)
+        self.layer_norm = nn.LayerNorm(hidden_feat_dim)
 
         self.device = device
 
@@ -43,26 +25,31 @@ class GNN(nn.Module):
             mention_hidden_state,
             entity_hidden_state,
             sent_hidden_state,
+            virtual_hidden_state,
             graph,
         ) = inputs
         
         batch_size, num_mention, _ = mention_hidden_state.shape
         num_entity = int(entity_hidden_state.shape[1])
         num_sent = int(sent_hidden_state.shape[1])
-        
+        num_virtual = int(virtual_hidden_state[1])
+    
         mention_type_embedding = self.node_type_embedding(torch.tensor(0).to(self.device)).view(1, 1, -1)
         entity_type_embedding = self.node_type_embedding(torch.tensor(1).to(self.device)).view(1, 1, -1)
         sent_type_embedding = self.node_type_embedding(torch.tensor(2).to(self.device)).view(1, 1, -1)
-
+        virtual_type_embedding = self.node_type_embedding(torch.tensor(3).to(self.device)).view(1, 1, -1)
+        
         mention_type_embedding = torch.broadcast_to(mention_type_embedding, (batch_size, num_mention, -1))
         entity_type_embedding = torch.broadcast_to(entity_type_embedding, (batch_size, num_entity, -1))
         sent_type_embedding = torch.broadcast_to(sent_type_embedding, (batch_size, num_sent, -1))
-       
+        virtual_type_embedding = torch.broadcast_to(virtual_type_embedding, (batch_size, num_virtual, -1))
+        
         mention_hidden_state = torch.concat((mention_hidden_state, mention_type_embedding), dim=2)
         entity_hidden_state = torch.concat((entity_hidden_state, entity_type_embedding), dim=2)
         sent_hidden_state = torch.concat((sent_hidden_state, sent_type_embedding), dim=2)
+        virtual_hidden_state = torch.concat((virtual_hidden_state, virtual_type_embedding), dim=2)
         
-        node_hidden_state = torch.concat((mention_hidden_state, entity_hidden_state, sent_hidden_state), dim=1)
+        node_hidden_state = torch.concat((mention_hidden_state, entity_hidden_state, sent_hidden_state, virtual_hidden_state), dim=1)
         # node_hidden_state = self.layer_norm(node_hidden_state)  # Try out
 
         num_node = int(node_hidden_state.shape[1])

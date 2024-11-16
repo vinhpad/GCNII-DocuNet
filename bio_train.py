@@ -13,7 +13,6 @@ from torch.utils.data import *
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import get_cosine_schedule_with_warmup
 from transformers import AutoModel, AutoTokenizer, AutoConfig
-from augmentation_graph import augmentation
 
 def set_seed(seeder):
     random.seed(seeder)
@@ -321,23 +320,16 @@ def main():
     config.bert_config = bert_config
 
     set_seed(args)
-    grace_model = GRACE(config, bert_model)
     model = DocREModel(config, bert_model)
     model.to(device)
-    grace_model.to(device)
-
+    
     if args.load_path == "":
         train_features.extend(dev_features)
-        if args.grace_load_path == "":
-            raise Exception('Not found grace pre train model!')
-        else:
-            grace_model.load_state_dict(torch.load(args.grace_load_path))
-        train(args, grace_model, model, train_features, dev_features, test_features)
-        
+        train(args, model, train_features, dev_features, test_features)
     else:       
         model.load_state_dict(torch.load(args.load_path))
         logger.info(f'Load state dict checkpoint : {args.load_path}.')
-        _, test_output = evaluate(args, grace_model, model, test_features, tag="test")
+        _, test_output = evaluate(args, model, test_features, tag="test")
         logger.info(f'Test F1 score : {test_output}.')
     
 if __name__ == '__main__':

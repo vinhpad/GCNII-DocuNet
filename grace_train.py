@@ -210,8 +210,6 @@ def main():
         num_labels=args.num_class
     )
 
-    print(bert_config)
-
     bert_config.cls_token_id = tokenizer.cls_token_id
     bert_config.sep_token_id = tokenizer.sep_token_id
     bert_config.transformer_type = args.transformer_type
@@ -227,7 +225,6 @@ def main():
     config.bert_config = bert_config
     set_seed(args.seed)
     model = GRACE(config, bert_model)
-    
     model.to(device)
     train_features.extend(dev_features)
     grace_train(config, model, train_features)
