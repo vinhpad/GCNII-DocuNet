@@ -6,7 +6,6 @@ from collate.collator import *
 
 from tqdm import tqdm
 from preprocess import *
-from models.grace import GRACE
 from logger import logger
 from models.model import DocREModel
 from torch.utils.data import *

@@ -30,16 +30,17 @@ if true; then
     --num_train_epochs 30 \
     --seed 66 \
     --num_class 97 \
-    --save_path ./checkpoint/docred/train_bert-lr${bl}_accum${accum}_unet-lr${ul}_type_${channel_type}.pt \
-    --log_dir ./logs/docred/train_bert-lr${bl}_accum${accum}_unet-lr${ul}_type_${channel_type}.log
+    --save_path checkpoint/docred/train_bert-lr${bl}_accum${accum}_unet-lr${ul}_type_${channel_type}.pt \
+    --log_dir logs/docred/train_bert-lr${bl}_accum${accum}_unet-lr${ul}_type_${channel_type}.log
     done
   elif [[ $transformer_type == roberta ]]; then
     type=context-based
-    bs=2
-    bls=(3e-5)
+    bs=8
+    bl=3e-5
     ul=4e-4
     accum=2
-    for bl in ${bls[@]}
+    seeds=(123 21020097 567 111 333)
+    for seed in ${seeds[@]}
     do
     python -u ./docred_train.py --data_dir ./dataset/docred \
     --channel_type $channel_type \
@@ -57,10 +58,10 @@ if true; then
     --max_grad_norm 1.0 \
     --warmup_ratio 0.06 \
     --num_train_epochs 30 \
-    --seed 111 \
+    --seed $seed \
     --num_class 97 \
-    --save_path ./checkpoint/docred/train_roberta-lr${bl}_accum${accum}_unet-lr${ul}_type_${channel_type}.pt \
-    --log_dir ./logs/docred/train_roberta-lr${bl}_accum${accum}_unet-lr${ul}_type_${channel_type}.log
+    --save_path ./checkpoints/docred/train_roberta-lr${bl}_accum${accum}_unet-lr${ul}_type_${channel_type}_seed_${seed}.pt \
+    --log_dir ./logs/docred/train_roberta-lr${bl}_accum${accum}_unet-lr${ul}_type_${channel_type}_seed_${seed}.log
     done
   fi
 fi

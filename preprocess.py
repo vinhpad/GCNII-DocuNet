@@ -41,7 +41,7 @@ class ReadDataset:
 
 
 
-def read_docred(transfermers, file_in, save_file, tokenizer, max_seq_length=1024):
+def read_docred(file_in, save_file, tokenizer, max_seq_length=1024):
     if os.path.exists(save_file):
         with open(file=save_file, mode='rb') as fr:
             features = pickle.load(fr)
@@ -49,8 +49,6 @@ def read_docred(transfermers, file_in, save_file, tokenizer, max_seq_length=1024
         print('load preprocessed data from {}.'.format(save_file))
         return features
     else:
-        max_len = 0
-        up512_num = 0
         i_line = 0
         pos_samples = 0
         neg_samples = 0
@@ -59,63 +57,36 @@ def read_docred(transfermers, file_in, save_file, tokenizer, max_seq_length=1024
             return None
         with open(file_in, "r") as fh:
             data = json.load(fh)
-        if transfermers == 'bert':
-            # entity_type = ["ORG", "-",  "LOC", "-",  "TIME", "-",  "PER", "-", "MISC", "-", "NUM"]
-            entity_type = ["-", "ORG", "-",  "LOC", "-",  "TIME", "-",  "PER", "-", "MISC", "-", "NUM"]
-
 
         for sample in tqdm(data, desc="Example"):
             sents = []
             sent_map = []
-
+            sent_pos = []
             entities = sample['vertexSet']
             entity_start, entity_end = [], []
-            mention_types = []
             for entity in entities:
                 for mention in entity:
                     sent_id = mention["sent_id"]
                     pos = mention["pos"]
-                    entity_start.append((sent_id, pos[0]))
-                    entity_end.append((sent_id, pos[1] - 1))
-                    mention_types.append(mention['type'])
-
+                    entity_start.append((sent_id, pos[0],))
+                    entity_end.append((sent_id, pos[1] - 1,))
             for i_s, sent in enumerate(sample['sents']):
+                start_sent = len(sents)
+                sents.append('[SENT]')
                 new_map = {}
                 for i_t, token in enumerate(sent):
                     tokens_wordpiece = tokenizer.tokenize(token)
                     if (i_s, i_t) in entity_start:
-                        t = entity_start.index((i_s, i_t))
-                        if transfermers == 'bert':
-                            mention_type = mention_types[t]
-                            special_token_i = entity_type.index(mention_type)
-                            special_token = ['[unused' + str(special_token_i) + ']']
-                        else:
-                            special_token = ['*']
-                        tokens_wordpiece = special_token + tokens_wordpiece
-                        # tokens_wordpiece = ["[unused0]"]+ tokens_wordpiece
-
+                        tokens_wordpiece = ["[ENTITY]"] + tokens_wordpiece
                     if (i_s, i_t) in entity_end:
-                        t = entity_end.index((i_s, i_t))
-                        if transfermers == 'bert':
-                            mention_type = mention_types[t]
-                            special_token_i = entity_type.index(mention_type) + 50
-                            special_token = ['[unused' + str(special_token_i) + ']']
-                        else:
-                            special_token = ['*']
-                        tokens_wordpiece = tokens_wordpiece + special_token
-
-                        # tokens_wordpiece = tokens_wordpiece + ["[unused1]"]
-                        # print(tokens_wordpiece,tokenizer.convert_tokens_to_ids(tokens_wordpiece))
-
+                        tokens_wordpiece = tokens_wordpiece + ["[/ENTITY]"]
                     new_map[i_t] = len(sents)
                     sents.extend(tokens_wordpiece)
+                end_sent = len(sents)
+                sent_pos.append((start_sent, end_sent))
                 new_map[i_t + 1] = len(sents)
+                sents.append('[/SENT]')
                 sent_map.append(new_map)
-
-            if len(sents)>max_len:
-                max_len=len(sents)
-            if len(sents)>512:
-                up512_num += 1
 
             train_triple = {}
             if "labels" in sample:
@@ -132,15 +103,12 @@ def read_docred(transfermers, file_in, save_file, tokenizer, max_seq_length=1024
             entity_pos = []
             for e in entities:
                 entity_pos.append([])
-                mention_num = len(e)
                 for m in e:
                     start = sent_map[m["sent_id"]][m["pos"][0]]
                     end = sent_map[m["sent_id"]][m["pos"][1]]
                     entity_pos[-1].append((start, end,))
 
-
             relations, hts = [], []
-            # Get positive samples from dataset
             for h, t in train_triple.keys():
                 relation = [0] * len(docred_rel2id)
                 for mention in train_triple[h, t]:
@@ -150,7 +118,6 @@ def read_docred(transfermers, file_in, save_file, tokenizer, max_seq_length=1024
                 hts.append([h, t])
                 pos_samples += 1
 
-            # Get negative samples from dataset
             for h in range(len(entities)):
                 for t in range(len(entities)):
                     if h != t and [h, t] not in hts:
@@ -161,34 +128,26 @@ def read_docred(transfermers, file_in, save_file, tokenizer, max_seq_length=1024
 
             assert len(relations) == len(entities) * (len(entities) - 1)
 
-            if len(hts)==0:
-                print(len(sent))
             sents = sents[:max_seq_length - 2]
             input_ids = tokenizer.convert_tokens_to_ids(sents)
             input_ids = tokenizer.build_inputs_with_special_tokens(input_ids)
 
             i_line += 1
             feature = {'input_ids': input_ids,
-                       'entity_pos': entity_pos,
-                       'labels': relations,
-                       'hts': hts,
-                       'title': sample['title'],
-                       }
+                    'entity_pos': entity_pos,
+                    'labels': relations,
+                    'hts': hts,
+                    'title': sample['title'],
+                    'sent_pos': sent_pos
+                    }
             features.append(feature)
-
-
-
-        print("# of documents {}.".format(i_line))
-        print("# of positive examples {}.".format(pos_samples))
-        print("# of negative examples {}.".format(neg_samples))
-        print("# {} examples len>512 and max len is {}.".format(up512_num, max_len))
-
-
         with open(file=save_file, mode='wb') as fw:
             pickle.dump(features, fw)
-        print('finish reading {} and save preprocessed data to {}.'.format(file_in, save_file))
 
-        return features
+    print("# of documents {}.".format(i_line))
+    print("# of positive examples {}.".format(pos_samples))
+    print("# of negative examples {}.".format(neg_samples))
+    return features
 
 def read_cdr(file_in, save_file, tokenizer, max_seq_length=1024) -> List[Any]:
 

@@ -1,4 +1,5 @@
 import os
+import random
 import time
 import json
 import torch
@@ -9,116 +10,114 @@ from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoModel, AutoTokenizer
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from models.model import DocREModel
-from collate.collator import set_seed, collate_fn
+from collate.collator import collate_fn
 from evaluation import to_official, official_evaluate
-from preprocess import ReadDataset
-from logger import logger, set_log_dir
+from preprocess import read_docred
+from logger import logger, setup_log_path
 from tqdm import tqdm
+
+def set_seed(seeder):
+    random.seed(seeder)
+    np.random.seed(seeder)
+    torch.manual_seed(seeder)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seeder)
+    
+    logger.info(f'System set seeder: {seeder}.')
 
 def train(args, model, train_features, dev_features, test_features):
 
-    def finetune(features, optimizer, num_epoch, num_steps, model):
-        cur_model = model.module if hasattr(model, 'module') else model
-
-        if args.train_from_saved_model != '':
-            best_score = torch.load(args.train_from_saved_model)["best_f1"]
-            epoch_delta = torch.load(args.train_from_saved_model)["epoch"] + 1
-        else:
-            epoch_delta = 0
-            best_score = -1
-
-        train_dataloader = DataLoader(
-            features, 
-            batch_size=args.train_batch_size, 
-            shuffle=True, 
-            collate_fn=collate_fn, 
-            drop_last=True
-        )
-
-        train_iterator = [epoch + epoch_delta for epoch in range(int(num_epoch))]
-
-        total_steps = int(len(train_dataloader) * num_epoch // args.gradient_accumulation_steps)
-        warmup_steps = int(total_steps * args.warmup_ratio)
-        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
-
-        global_step = 0
-        log_step = 100
-        total_loss = 0
-        
-        for epoch in train_iterator:
+    def finetune(features, optimizer, num_epoch, num_steps):
             
-            start_time = time.time()
-            optimizer.zero_grad()
+            train_dataloader = DataLoader(features, batch_size=args.train_batch_size, shuffle=True, collate_fn=collate_fn, drop_last=True)
+            train_iterator = range(int(num_epoch))
+            total_steps = int(len(train_dataloader) * num_epoch // args.gradient_accumulation_steps)
+            warmup_steps = int(total_steps * args.warmup_ratio)
+            scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
 
-            for step, batch in tqdm(enumerate(train_dataloader)):
-                model.train()
-                (
-                    input_ids, input_mask,
-                    batch_entity_pos, batch_sent_pos, batch_virtual_pos,
-                    graph, num_mention, num_entity, num_sent, num_virtual,
-                    labels, hts
-                ) = batch
+            log_step = 50
+            total_loss = 0
+            total_altop_loss = 0
+            total_grace_loss = 0
+            for epoch in tqdm(train_iterator):
+                start_time = time.time()
+                model.zero_grad()
+                for step, batch in tqdm(enumerate(train_dataloader)):
+                    model.train()
+                    (
+                        input_ids, input_mask,
+                        batch_entity_pos, batch_sent_pos, batch_virtual_pos,
+                        graph, num_mention, num_entity, num_sent, num_virtual,
+                        labels, hts
+                    ) = batch
 
-                inputs = {
-                    'input_ids': input_ids.to(args.device),
-                    'attention_mask': input_mask.to(args.device),
-                    'entity_pos': batch_entity_pos,
-                    'sent_pos': batch_sent_pos,
-                    'virtual_pos': batch_virtual_pos,
-                    'graph': graph.to(args.device),
-                    'num_mention': num_mention,
-                    'num_entity': num_entity,
-                    'num_sent': num_sent,
-                    'num_virtual': num_virtual,
-                    'labels': labels,
-                    'hts': hts,
-                }
-
-                outputs = model(**inputs)
-                loss = outputs[0] / args.gradient_accumulation_steps
-                total_loss += loss.item()
-
-                loss.backward()
-                if step % args.gradient_accumulation_steps == 0:
+                    inputs = {
+                        'input_ids': input_ids.to(args.device),
+                        'attention_mask': input_mask.to(args.device),
+                        'entity_pos': batch_entity_pos,
+                        'sent_pos': batch_sent_pos,
+                        'virtual_pos': batch_virtual_pos,
+                        'graph': graph.to(args.device),
+                        'num_mention': num_mention,
+                        'num_entity': num_entity,
+                        'num_sent': num_sent,
+                        'num_virtual': num_virtual,
+                        'labels': labels,
+                        'hts': hts,
+                    }
+                    outputs = model(**inputs)
+                    loss = outputs[0] / args.gradient_accumulation_steps
+                    altop_loss = outputs[1] / args.gradient_accumulation_steps
+                    grace_loss = outputs[2] / args.gradient_accumulation_steps
                     
-                    if args.max_grad_norm > 0:
+                    loss.backward()
+                    total_loss += loss.item()
+                    total_altop_loss += altop_loss.item()
+                    total_grace_loss += grace_loss.item()
+                    
+                    if step % args.gradient_accumulation_steps == 0:
                         
-                        torch.nn.utils.clip_grad_norm_(cur_model.parameters(), args.max_grad_norm)
-                    
-                    optimizer.step()
-                    scheduler.step()
-                    optimizer.zero_grad()
-                    global_step += 1
-                    num_steps += 1
-                    
-                    if global_step % log_step == 0:
-                        cur_loss = total_loss / log_step
-                        elapsed = time.time() - start_time
+                        if args.max_grad_norm > 0:
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+
+                        optimizer.step()
+                        scheduler.step()
+                        model.zero_grad()
+                        num_steps += 1
+                        
+                        if num_steps % log_step == 0:
+                            cur_loss = total_loss / log_step
+                            altop_loss = total_altop_loss / log_step
+                            grace_loss = total_grace_loss / log_step
+
+                            elapsed = time.time() - start_time
+
+                            logger.info(
+                            '| epoch {:2d} | step {:4d} | min/b {:5.2f} | lr {} | train loss {:5.3f} | altop loss {:5.3f} | grace loss {:5.3f}'.format(
+                                epoch, num_steps, elapsed / 60, scheduler.get_lr(), cur_loss, altop_loss, grace_loss))
+
+                            total_loss = 0
+                            total_altop_loss = 0
+                            total_grace_loss = 0
+                            start_time = time.time()
+
+                    if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
+                        eval_start_time = time.time()
+                        # _, dev_output = evaluate(args, model, dev_features, tag="dev")
+                        _, test_output = evaluate(args, model, test_features, tag="test")
                         logger.info(
-                            '| epoch {:2d} | step {:4d} | min/b {:5.2f} | lr {} | train loss {:5.3f}'.format(
-                                epoch, global_step, elapsed / 60, scheduler.get_last_lr(), cur_loss * 1000))
-                        total_loss = 0
-                        start_time = time.time()
-
-                if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
-                    eval_start_time = time.time()
-                    dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
-
-                    logger.info('| epoch {:3d} | time: {:5.2f}s | dev_result:{}'.format(epoch, time.time() - eval_start_time,
-                                                                                dev_output))
+                            '| epoch {:3d} | time: {:5.2f}s | test_output:{}'.format(epoch, time.time() - eval_start_time, test_output))
                     
-                    if dev_score > best_score:
-                        best_score = dev_score
-                        logger.info('| epoch {:3d} | best_f1:{}'.format(epoch, best_score))
-                        if args.save_path != "":
-                            torch.save({
-                                'epoch': epoch,
-                                'checkpoint': cur_model.state_dict(),
-                                'best_f1': best_score,
-                                'optimizer': optimizer.state_dict()
-                            }, args.save_path
-                            , _use_new_zipfile_serialization=False)
-        return num_steps
+                        # logger.info('| epoch {:3d} | best_f1:{}'.format(epoch, best_score))
+                        
+                if args.save_path != "":
+                    torch.save({
+                        'epoch': epoch,
+                        'checkpoint': model.state_dict(),
+                        # 'best_f1': best_score,
+                        'optimizer': optimizer.state_dict()
+                    }, args.save_path
+                    , _use_new_zipfile_serialization=False)
 
     cur_model = model.module if hasattr(model, 'module') else model
     extract_layer = ["extractor", "bilinear"]
@@ -130,15 +129,11 @@ def train(args, model, train_features, dev_features, test_features):
     ]
 
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
-    if args.train_from_saved_model != '':
-        optimizer.load_state_dict(torch.load(args.train_from_saved_model)["optimizer"])
-        print("load saved optimizer from {}.".format(args.train_from_saved_model))
-    
 
     num_steps = 0
-    set_seed(args)
+    set_seed(args.seed)
     model.zero_grad()
-    finetune(train_features, optimizer, args.num_train_epochs, num_steps, model)
+    finetune(train_features, optimizer, args.num_train_epochs, num_steps)
 
 
 def evaluate(args, model, features, tag="dev"):
@@ -222,12 +217,19 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--data_dir", default='./dataset/cdr', type=str)
-    parser.add_argument("--transformer_type",default="", type=str)
-    parser.add_argument("--model_name",default="", type=str)
-    parser.add_argument("--train_file",default="", type=str)
-    parser.add_argument("--dev_file",default="", type=str)
-    parser.add_argument("--test_file",default="", type=str)
-    parser.add_argument("--load_path",default="", type=str)
+    parser.add_argument("--transformer_type", default='', type=str)
+    parser.add_argument("--model_name_or_path", default='', type=str)
+
+    parser.add_argument("--train_file", default='', type=str)
+    parser.add_argument("--dev_file", default='', type=str)
+    parser.add_argument("--test_file", default='', type=str)
+    parser.add_argument("--load_path", default="", type=str)
+
+    parser.add_argument("--gnn_config_file", default="config_file/gnn_config.json", type=str,
+                        help="Config gnn model")
+
+    parser.add_argument("--config_name", default="", type=str,
+                        help="Pretrained config name or path if not the same as model_name")
 
     parser.add_argument("--tokenizer_name", default="", type=str,
                         help="Pretrained tokenizer name or path if not the same as model_name")
@@ -235,6 +237,8 @@ def main():
     parser.add_argument("--max_seq_length", default=1024, type=int,
                         help="The maximum total input sequence length after tokenization. Sequences longer "
                              "than this will be truncated, sequences shorter will be padded.")
+    
+    parser.add_argument("--evaluation_steps", default=-1, type=int)
 
     parser.add_argument("--train_batch_size", default=4, type=int,
                         help="Batch size for training.")
@@ -259,8 +263,7 @@ def main():
                         help="Warm up ratio for Adam.")
     parser.add_argument("--num_train_epochs", default=30.0, type=float,
                         help="Total number of training epochs to perform.")
-    parser.add_argument("--evaluation_steps", default=-1, type=int,
-                        help="Number of training steps between evaluations.")
+
     parser.add_argument("--seed", type=int, default=111,
                         help="random seed for initialization.")
     parser.add_argument("--num_class", type=int, default=2,
@@ -276,25 +279,36 @@ def main():
                         help="unet_out_dim.")
     parser.add_argument("--log_dir", type=str, default='',
                         help="log.")
-    
-    parser.add_argument("--log_file", type=str, default='',
-                        help="log.")
-
     parser.add_argument("--bert_lr", default=5e-5, type=float,
                         help="The initial learning rate for Adam.")
     parser.add_argument("--max_height", type=int, default=42,
                         help="log.")
 
-    parser.add_argument('--save_path', type=str, default='')
+    
+    parser.add_argument("--gnn_num_layer", type=int, default=4)
+    parser.add_argument("--gnn_num_node_type", type=int, default=4)
+    parser.add_argument("--gnn_node_type_embedding", type=int, default=50)
+    parser.add_argument("--gnn_hidden_feat_dim", type=int, default=256)
+
+    parser.add_argument("--grace_projection_hidden_feat_dim", type=int, default=256)
+    
+    parser.add_argument("--grace_loss_viz", default="")
+    parser.add_argument("--tau", type=float, default=0.7)
+    
+    parser.add_argument('--save_path', type=str, default='output')
+    parser.add_argument('--feature_prob_first', type=float, default=0.1)
+    parser.add_argument('--feature_prob_second', type=float, default=0.1)
+    parser.add_argument('--edge_prob_first', type=float, default=0.1)
+    parser.add_argument('--edge_prob_second', type=float, default=0.1)
 
     args = parser.parse_args()
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     args.device = device
-    set_seed(args)
-    set_log_dir(args.log_file)
+ 
+    setup_log_path(args.log_dir)
 
     # Using SciBert
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     tokenizer.add_special_tokens({
         'additional_special_tokens': [
             '[ENTITY]',
@@ -304,17 +318,16 @@ def main():
         ]
     })
 
-    Dataset = ReadDataset("docred", tokenizer, args.max_seq_length)
 
     train_file = os.path.join(args.data_dir, args.train_file)
     dev_file = os.path.join(args.data_dir, args.dev_file)
     test_file = os.path.join(args.data_dir, args.test_file)
-    train_features = Dataset.read(train_file)
-    dev_features = Dataset.read(dev_file)
-    test_features = Dataset.read(test_file)
+    train_features = read_docred(file_in=train_file, save_file="train.cache", tokenizer=tokenizer, max_seq_length=args.max_seq_length)
+    dev_features = read_docred(file_in=dev_file, save_file="dev.cache", tokenizer=tokenizer, max_seq_length=args.max_seq_length)
+    test_features = read_docred(file_in=test_file, save_file="test.cache",tokenizer=tokenizer, max_seq_length=args.max_seq_length)
 
     bert_config = AutoConfig.from_pretrained(
-        pretrained_model_name_or_path=args.model_name,
+        pretrained_model_name_or_path=args.model_name_or_path,
         num_labels=args.num_class
     )
 
@@ -323,15 +336,15 @@ def main():
     bert_config.transformer_type = args.transformer_type
     
     bert_model = AutoModel.from_pretrained(
-        args.model_name_or_model_path,
-        from_tf=bool(".ckpt" in args.model_name_or_model_path),
+        args.model_name_or_path,
+        from_tf=bool(".ckpt" in args.model_name_or_path),
         config=bert_config,
     )
-    bert_model.resize_token_embeddings(len(tokenizer))
-    
+    args.bert_config = bert_config
+
+    set_seed(args.seed)
     model = DocREModel(args, bert_model, num_labels=args.num_labels)
     model.to(device)
-    
     if args.load_path == "":
         train_features.extend(dev_features)
         train(args, model, train_features, dev_features, test_features)
