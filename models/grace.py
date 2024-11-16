@@ -1,29 +1,60 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch_geometric.nn import GCNConv
 
-from gcnii.air_gcnii import AIRGCNII
- 
-class GRACE(nn.Module):
-    
-    def __init__(self, num_hidden : int, num_proj_hidden : int, tau : 0.5):
-        super().__init__()
-        
-        self.encoder = AIRGCNII(
-            num_hidden=num_hidden,
-            num_layers=4,
-            drop_out=0.2,
-            drop_edge=0,
-            lambda_=0.5
-        )
-        
+class LogReg(nn.Module):
+    def __init__(self, ft_in, nb_classes):
+        super(LogReg, self).__init__()
+        self.fc = nn.Linear(ft_in, nb_classes)
+
+        for m in self.modules():
+            self.weights_init(m)
+
+    def weights_init(self, m):
+        if isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform_(m.weight.data)
+            if m.bias is not None:
+                m.bias.data.fill_(0.0)
+
+    def forward(self, seq):
+        ret = self.fc(seq)
+        return ret
+
+class Encoder(torch.nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, activation,
+                 base_model=GCNConv, k: int = 2):
+        super(Encoder, self).__init__()
+        self.base_model = base_model
+
+        assert k >= 2
+        self.k = k
+        self.conv = [base_model(in_channels, 2 * out_channels)]
+        for _ in range(1, k-1):
+            self.conv.append(base_model(2 * out_channels, 2 * out_channels))
+        self.conv.append(base_model(2 * out_channels, out_channels))
+        self.conv = nn.ModuleList(self.conv)
+
+        self.activation = activation
+
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor):
+        for i in range(self.k):
+            x = self.activation(self.conv[i](x, edge_index))
+        return x
+
+class GRACE(torch.nn.Module):
+    def __init__(self, encoder: Encoder, num_hidden: int, num_proj_hidden: int,
+                 tau: float = 0.5):
+        super(GRACE, self).__init__()
+        self.encoder: Encoder = encoder
         self.tau: float = tau
 
         self.fc1 = torch.nn.Linear(num_hidden, num_proj_hidden)
         self.fc2 = torch.nn.Linear(num_proj_hidden, num_hidden)
 
-    def forward(self, graph, features) -> torch.Tensor:
-        return self.encoder(graph, features)
+    def forward(self, x: torch.Tensor,
+                edge_index: torch.Tensor) -> torch.Tensor:
+        return self.encoder(x, edge_index)
 
     def projection(self, z: torch.Tensor) -> torch.Tensor:
         z = F.elu(self.fc1(z))
@@ -81,3 +112,13 @@ class GRACE(nn.Module):
         ret = ret.mean() if mean else ret.sum()
 
         return ret
+
+def drop_feature(x, drop_prob):
+    drop_mask = torch.empty(
+        (x.size(1), ),
+        dtype=torch.float32,
+        device=x.device).uniform_(0, 1) < drop_prob
+    x = x.clone()
+    x[:, drop_mask] = 0
+
+    return x

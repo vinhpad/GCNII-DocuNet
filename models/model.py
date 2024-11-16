@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch import nn
 from models.losses import balanced_loss as ATLoss
 from opt_einsum import contract
-from gnn import GNN
+from .gnn import GNN
 from models.attn_unet import AttentionUNet
 from utils import process_long_input
 from augmentation_graph import augmentation
@@ -20,19 +20,40 @@ class DocREModel(nn.Module):
         self.bert_config = args.bert_config
         self.bert_drop = nn.Dropout(0.6)
         self.bert_hidden_size = args.bert_config.hidden_size
+
         
         # graph neural network model config
-        self.gnn_config = args.gnn_config
-        self.gnn_hidden_size = self.bert_hidden_size + self.gnn_config.node_type_embedding
-        self.gnn = GNN(self.gnn_config, self.gnn_hidden_size, args.device)
+        self.gnn_hidden_size = self.bert_hidden_size + args.gnn_node_type_embedding
+        self.gnn = GNN(
+            num_node_type=args.gnn_num_node_type, 
+            node_type_embedding=args.gnn_node_type_embedding,
+            hidden_feat_dim=self.gnn_hidden_size, 
+            device=args.device
+        )
         
         # GRACE model config
-        self.grace_config = args.grace_config
-        self.grace_model = GRACE(self.grace_config).to(args.device)  
+        self.edge_drop_prob_first = args.edge_prob_first
+        self.edge_drop_prob_second = args.edge_prob_second
+        self.grace_model = GRACE(
+            encoder=None,
+            num_hidden = self.gnn_hidden_size, 
+            num_proj_hidden=args.grace_projection_hidden_feat_dim, 
+            tau=args.tau
+        ).to(args.device)
+        
+        # Unet config
+        self.unet_in_dim = args.unet_in_dim
+        self.unet_out_dim = args.unet_in_dim
+        self.liner = nn.Linear(self.bert_hidden_size, args.unet_in_dim)
+        self.min_height = args.max_height
+        self.channel_type = args.channel_type
+        self.segmentation_net = AttentionUNet(input_channels=args.unet_in_dim,
+                                              class_number=args.unet_out_dim,
+                                              down_channel=args.down_dim)
         
         # Model config
-        self.head_extractor = nn.Linear(args.grace_hidden_dim + self.hidden_size + args.node_type_embedding + args.unet_out_dim, emb_size)
-        self.tail_extractor = nn.Linear(args.grace_hidden_dim + self.hidden_size + args.node_type_embedding + args.unet_out_dim, emb_size)
+        self.head_extractor = nn.Linear(self.gnn_hidden_size + args.unet_out_dim, emb_size)
+        self.tail_extractor = nn.Linear(self.gnn_hidden_size + args.unet_out_dim, emb_size)
         self.binary_linear = nn.Linear(emb_size * block_size, self.bert_config.num_labels)
         self.num_labels = num_labels
         self.emb_size = emb_size
@@ -210,20 +231,21 @@ class DocREModel(nn.Module):
         entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
         sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
         virtual_embed = self.get_virtual_embed(sequence_output, virtual_pos, num_virtual)
-        entity_hidden_state, output_node_hidden_state = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph])
-        entity_hidden_state_grace = self.grace_model.projection(entity_embed)
+        entity_hidden_state, _ = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph])
+        
+        # entity_hidden_state_grace = self.grace_model.projection(entity_embed)
 
         local_context = self.get_hrt(sequence_output, attention, entity_pos, hts)
         s_embed, t_embed = self.get_pair_entity_embed(entity_hidden_state, hts)
-        s_embed_grace, t_embed_grace = self.get_pair_entity_embed(entity_hidden_state_grace, hts)
+        # s_embed_grace, t_embed_grace = self.get_pair_entity_embed(entity_hidden_state_grace, hts)
         
         feature_map = self.get_channel_map(sequence_output, local_context)
         attn_input = self.liner(feature_map).permute(0, 3, 1, 2).contiguous()
 
         attn_map = self.segmentation_net(attn_input)
         h_t = self.get_ht (attn_map, hts)
-        s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed_grace, s_embed, h_t], dim=1)))
-        t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed_grace, t_embed, h_t], dim=1)))
+        s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t], dim=1)))
+        t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t], dim=1)))
 
         b1 = s_embed.view(-1, self.emb_size // self.block_size, self.block_size)
         b2 = t_embed.view(-1, self.emb_size // self.block_size, self.block_size)
@@ -235,10 +257,10 @@ class DocREModel(nn.Module):
             labels = [torch.tensor(label) for label in labels]
             labels = torch.cat(labels, dim=0).to(logits)
             
-            graph_aug_1 = augmentation(graph=graph).to(self.device)
-            graph_aug_2 = augmentation(graph=graph).to(self.device)
-            z1 = self.grace_model(output_node_hidden_state, graph_aug_1)
-            z2 = self.grace_model(output_node_hidden_state, graph_aug_2)
+            graph_aug_1 = augmentation(graph=graph,edge_drop_prob=self.edge_drop_prob_first).to(self.device)
+            graph_aug_2 = augmentation(graph=graph,edge_drop_prob=self.edge_drop_prob_second).to(self.device)
+            _, z1 = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph_aug_1])
+            _, z2 = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph_aug_2])
  
             grace_loss = self.grace_model.loss(z1, z2, batch_size = 0)
             

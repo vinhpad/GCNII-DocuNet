@@ -11,7 +11,7 @@ from logger import logger
 from models.model import DocREModel
 from torch.utils.data import *
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import get_cosine_schedule_with_warmup
+from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from transformers import AutoModel, AutoTokenizer, AutoConfig
 
 def set_seed(seeder):
@@ -23,7 +23,7 @@ def set_seed(seeder):
     
     logger.info(f'System set seeder: {seeder}.')
 
-def train(args, grace_model, model, train_features, dev_features, test_features):
+def train(args, model, train_features, dev_features, test_features):
 
     def finetune(features, optimizer, num_epoch, num_steps):
         
@@ -31,52 +31,48 @@ def train(args, grace_model, model, train_features, dev_features, test_features)
         train_iterator = range(int(num_epoch))
         total_steps = int(len(train_dataloader) * num_epoch // args.gradient_accumulation_steps)
         warmup_steps = int(total_steps * args.warmup_ratio)
-        scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
+        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
 
         log_step = 50
         total_loss = 0
+        total_altop_loss = 0
+        total_grace_loss = 0
         for epoch in tqdm(train_iterator):
             start_time = time.time()
             model.zero_grad()
             for step, batch in tqdm(enumerate(train_dataloader)):
                 model.train()
                 (
-                    input_ids, 
-                    input_mask,
-                    batch_entity_pos, 
-                    batch_sent_pos, 
-                    graph, 
-                    num_mention, 
-                    num_entity, 
-                    num_sent, 
-                    labels, 
-                    hts
+                    input_ids, input_mask,
+                    batch_entity_pos, batch_sent_pos, batch_virtual_pos,
+                    graph, num_mention, num_entity, num_sent, num_virtual,
+                    labels, hts
                 ) = batch
 
-                features = grace_model(
-                    features = input_ids.to(args.device),
-                    attention_mask = input_mask.to(args.device),
-                    entity_pos = batch_entity_pos,
-                    sent_pos = batch_sent_pos,
-                    graph = graph.to(args.device),
-                    num_mention = num_mention,
-                    num_entity = num_entity,
-                    num_sent = num_sent
-                )
-
-                outputs = model(
-                    features,
-                    input_mask.to(args.device),
-                    batch_entity_pos,
-                    num_mention,
-                    num_entity,
-                    labels,
-                    hts
-                )
-
+                inputs = {
+                    'input_ids': input_ids.to(args.device),
+                    'attention_mask': input_mask.to(args.device),
+                    'entity_pos': batch_entity_pos,
+                    'sent_pos': batch_sent_pos,
+                    'virtual_pos': batch_virtual_pos,
+                    'graph': graph.to(args.device),
+                    'num_mention': num_mention,
+                    'num_entity': num_entity,
+                    'num_sent': num_sent,
+                    'num_virtual': num_virtual,
+                    'labels': labels,
+                    'hts': hts,
+                }
+                outputs = model(**inputs)
                 loss = outputs[0] / args.gradient_accumulation_steps
+                altop_loss = outputs[1] / args.gradient_accumulation_steps
+                grace_loss = outputs[2] / args.gradient_accumulation_steps
+                
                 loss.backward()
                 total_loss += loss.item()
+                total_altop_loss += altop_loss.item()
+                total_grace_loss += grace_loss.item()
+                
                 if step % args.gradient_accumulation_steps == 0:
                     
                     if args.max_grad_norm > 0:
@@ -89,24 +85,33 @@ def train(args, grace_model, model, train_features, dev_features, test_features)
                     
                     if num_steps % log_step == 0:
                         cur_loss = total_loss / log_step
+                        altop_loss = total_altop_loss / log_step
+                        grace_loss = total_grace_loss / log_step
+
                         elapsed = time.time() - start_time
 
                         logger.info(
-                           '| epoch {:2d} | step {:4d} | min/b {:5.2f} | lr {} | train loss {:5.3f}'.format(
-                               epoch, num_steps, elapsed / 60, scheduler.get_lr(), cur_loss * 1000))
+                           '| epoch {:2d} | step {:4d} | min/b {:5.2f} | lr {} | train loss {:5.3f} | altop loss {:5.3f} | grace loss {:5.3f}'.format(
+                               epoch, num_steps, elapsed / 60, scheduler.get_lr(), cur_loss, altop_loss, grace_loss))
 
                         total_loss = 0
                         start_time = time.time()
 
                 if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
                     eval_start_time = time.time()
-                    _, dev_output = evaluate(args, model, dev_features, tag="dev")
+                    # _, dev_output = evaluate(args, model, dev_features, tag="dev")
                     _, test_output = evaluate(args, model, test_features, tag="test")
                     logger.info(
-                        '| epoch {:3d} | time: {:5.2f}s | dev_output:{} | test_output:{}'.format(epoch, time.time() - eval_start_time,
-                                                                                dev_output, test_output))
-
-    set_seed(args) 
+                        '| epoch {:3d} | time: {:5.2f}s | test_output:{}'.format(epoch, time.time() - eval_start_time, test_output))
+            if args.save_path != "":
+                torch.save({
+                    'epoch': epoch,
+                    'checkpoint': model.state_dict(),
+                    # 'best_f1': best_score,
+                    'optimizer': optimizer.state_dict()
+                }, args.save_path
+                , _use_new_zipfile_serialization=False)
+                
     extract_layer = ["extractor", "bilinear"]
     bert_layer = ['bert_model']
     
@@ -129,7 +134,7 @@ def train(args, grace_model, model, train_features, dev_features, test_features)
     return best_score
     
 
-def evaluate(args, grace_model, model, features, tag='test'):
+def evaluate(args, model, features, tag='test'):
     dataloader = DataLoader(features, batch_size=args.test_batch_size, 
                             shuffle=False, collate_fn=collate_fn, drop_last=False)
 
@@ -137,47 +142,34 @@ def evaluate(args, grace_model, model, features, tag='test'):
     for batch in tqdm(dataloader):
         model.eval()
         (
-            input_ids, 
-            input_mask,
-            batch_entity_pos, 
-            batch_sent_pos, 
-            graph, 
-            num_mention, 
-            num_entity, 
-            num_sent, 
-            labels, 
-            hts
+            input_ids, input_mask,
+            batch_entity_pos, batch_sent_pos, batch_virtual_pos,
+            graph, num_mention, num_entity, num_sent, num_virtual,
+            labels, hts
         ) = batch
 
+        inputs = {'input_ids': input_ids.to(args.device),
+                    'attention_mask': input_mask.to(args.device),
+                    'entity_pos': batch_entity_pos,
+                    'sent_pos': batch_sent_pos,
+                    'virtual_pos': batch_virtual_pos,
+                    'graph': graph.to(args.device),
+                    'num_mention': num_mention,
+                    'num_entity': num_entity,
+                    'num_sent': num_sent,
+                    'num_virtual': num_virtual,
+                    'labels': labels,
+                    'hts': hts,
+                }
+
         with torch.no_grad():
-            features = grace_model(
-                features = input_ids.to(args.device),
-                attention_mask = input_mask.to(args.device),
-                entity_pos = batch_entity_pos,
-                sent_pos = batch_sent_pos,
-                graph = graph.to(args.device),
-                num_mention = num_mention,
-                num_entity = num_entity,
-                num_sent = num_sent
-            )
-
-            output = model(
-                features,
-                input_mask.to(args.device),
-                batch_entity_pos,
-                num_mention,
-                num_entity,
-                labels,
-                hts
-            )
-
+            output = model(**inputs)
             loss = output[0]
-            pred = output[1].cpu().numpy()
+            pred = output[-1].cpu().numpy()
             pred[np.isnan(pred)] = 0
             preds.append(pred)
             golds.append(np.concatenate([np.array(label, np.float32) for label in labels], axis=0))
-         
-
+            
     preds = np.concatenate(preds, axis=0).astype(np.float32)
     golds = np.concatenate(golds, axis=0).astype(np.float32)
     tp = ((preds[:, 1] == 1) & (golds[:, 1] == 1)).astype(np.float32).sum()
@@ -199,7 +191,7 @@ def main():
 
     parser.add_argument("--data_dir", default='./dataset/cdr', type=str)
     parser.add_argument("--transformer_type", default='', type=str)
-    parser.add_argument("--model_name", default='', type=str)
+    parser.add_argument("--model_name_or_path", default='', type=str)
 
     parser.add_argument("--train_file", default='', type=str)
     parser.add_argument("--dev_file", default='', type=str)
@@ -219,9 +211,7 @@ def main():
                         help="The maximum total input sequence length after tokenization. Sequences longer "
                              "than this will be truncated, sequences shorter will be padded.")
     
-    parser.add_argument("--evaluation_steps", default=400, type=int)
-
-    parser.add_argument("--grace_mode_path", default="", type=int)
+    parser.add_argument("--evaluation_steps", default=-1, type=int)
 
     parser.add_argument("--train_batch_size", default=4, type=int,
                         help="Batch size for training.")
@@ -246,8 +236,7 @@ def main():
                         help="Warm up ratio for Adam.")
     parser.add_argument("--num_train_epochs", default=30.0, type=float,
                         help="Total number of training epochs to perform.")
-    parser.add_argument("--evaluation_steps", default=-1, type=int,
-                        help="Number of training steps between evaluations.")
+
     parser.add_argument("--seed", type=int, default=111,
                         help="random seed for initialization.")
     parser.add_argument("--num_class", type=int, default=2,
@@ -268,10 +257,22 @@ def main():
     parser.add_argument("--max_height", type=int, default=42,
                         help="log.")
 
-    parser.add_argument("--gnn_num_layer", type=int, default=2)
-    parser.add_argument("--gnn_node_embedding", type=int, default=50)
-    parser.add_argument("--tau", type=float, default=0.4)
+    
+    parser.add_argument("--gnn_num_layer", type=int, default=4)
+    parser.add_argument("--gnn_num_node_type", type=int, default=4)
+    parser.add_argument("--gnn_node_type_embedding", type=int, default=50)
+    parser.add_argument("--gnn_hidden_feat_dim", type=int, default=256)
+
+    parser.add_argument("--grace_projection_hidden_feat_dim", type=int, default=256)
+    
+    parser.add_argument("--grace_loss_viz", default="")
+    parser.add_argument("--tau", type=float, default=0.7)
+    
     parser.add_argument('--save_path', type=str, default='output')
+    parser.add_argument('--feature_prob_first', type=float, default=0.1)
+    parser.add_argument('--feature_prob_second', type=float, default=0.1)
+    parser.add_argument('--edge_prob_first', type=float, default=0.1)
+    parser.add_argument('--edge_prob_second', type=float, default=0.1)
 
     args = parser.parse_args()
     # Setup device for pytorch
@@ -281,7 +282,7 @@ def main():
     logger.info(f'Using device: {device}!')
 
     # Using SciBert
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     tokenizer.add_special_tokens({
         'additional_special_tokens': [
             '[ENTITY]',
@@ -302,7 +303,7 @@ def main():
     test_features = reader(file_in=test_file, save_file="test.cache",tokenizer=tokenizer, max_seq_length=args.max_seq_length)
 
     bert_config = AutoConfig.from_pretrained(
-        pretrained_model_name_or_path=args.model_name,
+        pretrained_model_name_or_path=args.model_name_or_path,
         num_labels=args.num_class
     )
 
@@ -311,23 +312,24 @@ def main():
     bert_config.transformer_type = args.transformer_type
     
     bert_model = AutoModel.from_pretrained(
-        pretrained_model_name_or_path=args.model_name,
+        pretrained_model_name_or_path=args.model_name_or_path,
         config=bert_config
     )
 
     bert_model.resize_token_embeddings(len(tokenizer))
-    config = args
-    config.bert_config = bert_config
+    
+    args.bert_config = bert_config
+    
 
-    set_seed(args)
-    model = DocREModel(config, bert_model)
+    set_seed(args.seed)
+    model = DocREModel(args, bert_model, num_labels=args.num_labels)
     model.to(device)
     
     if args.load_path == "":
         train_features.extend(dev_features)
         train(args, model, train_features, dev_features, test_features)
     else:       
-        model.load_state_dict(torch.load(args.load_path))
+        model.load_state_dict(torch.load(args.load_path)['checkpoint'])
         logger.info(f'Load state dict checkpoint : {args.load_path}.')
         _, test_output = evaluate(args, model, test_features, tag="test")
         logger.info(f'Test F1 score : {test_output}.')

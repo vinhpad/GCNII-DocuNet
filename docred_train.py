@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import torch
 import argparse
 import numpy as np
@@ -154,19 +155,20 @@ def evaluate(args, model, features, tag="dev"):
             labels, hts
         ) = batch
 
-        inputs = {'input_ids': input_ids.to(args.device),
-                    'attention_mask': input_mask.to(args.device),
-                    'entity_pos': batch_entity_pos,
-                    'sent_pos': batch_sent_pos,
-                    'virtual_pos': batch_virtual_pos,
-                    'graph': graph.to(args.device),
-                    'num_mention': num_mention,
-                    'num_entity': num_entity,
-                    'num_sent': num_sent,
-                    'num_virtual': num_virtual,
-                    'labels': labels,
-                    'hts': hts,
-                }
+        inputs = {
+            'input_ids': input_ids.to(args.device),
+            'attention_mask': input_mask.to(args.device),
+            'entity_pos': batch_entity_pos,
+            'sent_pos': batch_sent_pos,
+            'virtual_pos': batch_virtual_pos,
+            'graph': graph.to(args.device),
+            'num_mention': num_mention,
+            'num_entity': num_entity,
+            'num_sent': num_sent,
+            'num_virtual': num_virtual,
+            'labels': labels,
+            'hts': hts,
+        }
 
         with torch.no_grad():
             output = model(**inputs)
@@ -220,18 +222,12 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--data_dir", default='./dataset/cdr', type=str)
-    parser.add_argument("--transformer_type",  type=str)
-    parser.add_argument("--model_name", type=str)
-    parser.add_argument("--train_file", type=str)
-    parser.add_argument("--dev_file", type=str)
-    parser.add_argument("--test_file", type=str)
-    parser.add_argument("--load_path", type=str)
-
-    parser.add_argument("--gnn_config_file", default="config_file/gnn_config.json", type=str,
-                        help="Config gnn model")
-
-    parser.add_argument("--config_name", default="", type=str,
-                        help="Pretrained config name or path if not the same as model_name")
+    parser.add_argument("--transformer_type",default="", type=str)
+    parser.add_argument("--model_name",default="", type=str)
+    parser.add_argument("--train_file",default="", type=str)
+    parser.add_argument("--dev_file",default="", type=str)
+    parser.add_argument("--test_file",default="", type=str)
+    parser.add_argument("--load_path",default="", type=str)
 
     parser.add_argument("--tokenizer_name", default="", type=str,
                         help="Pretrained tokenizer name or path if not the same as model_name")
@@ -289,7 +285,7 @@ def main():
     parser.add_argument("--max_height", type=int, default=42,
                         help="log.")
 
-    parser.add_argument('--save_path', type=str, default='output')
+    parser.add_argument('--save_path', type=str, default='')
 
     args = parser.parse_args()
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -327,35 +323,24 @@ def main():
     bert_config.transformer_type = args.transformer_type
     
     bert_model = AutoModel.from_pretrained(
-        args.model_name,
-        from_tf=bool(".ckpt" in args.model_name),
+        args.model_name_or_model_path,
+        from_tf=bool(".ckpt" in args.model_name_or_model_path),
         config=bert_config,
     )
     bert_model.resize_token_embeddings(len(tokenizer))
     
-    gnn_config = RunConfig.from_json(args.gnn_config_file)
-    gnn_config = gnn_config.model.gnn
-
-    model = DocREModel(bert_config, gnn_config, args, bert_model, num_labels=args.num_labels)
-    
-    # if args.train_from_saved_model != '':
-    #     model.load_state_dict(torch.load(args.train_from_saved_model)["checkpoint"])
-    #     logger.info("load saved model from {}.".format(args.train_from_saved_model))
+    model = DocREModel(args, bert_model, num_labels=args.num_labels)
     model.to(device)
     
-    # logger.info(args)
-    # model.load_state_dict(torch.load(args.load_path)['checkpoint'])
-    # print(model)
-    #train.
-    # train(args, model, train_features, dev_features, test_features)
-    args.load_path = ""
-    if args.load_path == "":  # Training
+    if args.load_path == "":
+        train_features.extend(dev_features)
         train(args, model, train_features, dev_features, test_features)
-    else:  # Testing
+    else:
         model.load_state_dict(torch.load(args.load_path)['checkpoint'])
-        T_features = test_features  # Testing on the test set
+        T_features = test_features
         pred = report(args, model, T_features)
-        with open("./submit_result/result.json", "w") as fh:
+
+        with open(f'./submit_result/seed_{args.seed}.json', "w") as fh:
             json.dump(pred, fh)
 
 if __name__ == "__main__":

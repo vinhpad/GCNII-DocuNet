@@ -2,7 +2,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 if true; then
 type=context-based
-bs=4
+bs=1
 bl=3e-5
 uls=(2e-5)
 accum=1
@@ -16,7 +16,7 @@ for seed in ${seeds[@]}
     --channel_type $type \
     --bert_lr $bl \
     --transformer_type bert \
-    --model_name microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext \
+    --model_name_or_path microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext \
     --train_file train_filter.data \
     --dev_file dev_filter.data \
     --test_file test_filter.data \
@@ -29,8 +29,7 @@ for seed in ${seeds[@]}
     --warmup_ratio 0.06 \
     --num_train_epochs 20 \
     --tau 0.7 \
-    --gnn_num_layer 2 \
-    --gnn_node_embedding 50 \
+    --gnn_num_layer 4 \
     --seed $seed \
     --num_class 2 \
     --save_path output/checkpoints/cdr/train_scibert-lr${bl}_accum${accum}_unet-lr${ul}_bs${bs}.pt \
@@ -38,5 +37,3 @@ for seed in ${seeds[@]}
   done
 done
 fi
-
-# 87.81400467142865

@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from gcnii.air_gcnii import AIRGCNII
+from .gcnii.air_gcnii import AIRGCNII
 
 class GNN(nn.Module):
     def __init__(self, num_node_type, node_type_embedding, hidden_feat_dim: int, device: torch.device):
@@ -32,7 +32,7 @@ class GNN(nn.Module):
         batch_size, num_mention, _ = mention_hidden_state.shape
         num_entity = int(entity_hidden_state.shape[1])
         num_sent = int(sent_hidden_state.shape[1])
-        num_virtual = int(virtual_hidden_state[1])
+        num_virtual = int(virtual_hidden_state.shape[1])
     
         mention_type_embedding = self.node_type_embedding(torch.tensor(0).to(self.device)).view(1, 1, -1)
         entity_type_embedding = self.node_type_embedding(torch.tensor(1).to(self.device)).view(1, 1, -1)
