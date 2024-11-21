@@ -146,8 +146,8 @@ def evaluate(args, model, features, tag='test'):
         model.eval()
         (
             input_ids, input_mask,
-            batch_entity_pos, batch_sent_pos, batch_virtual_pos,
-            graph, num_mention, num_entity, num_sent, num_virtual,
+            batch_entity_pos, batch_sent_pos, batch_token_pos,
+            graph, num_mention, num_entity, num_sent, num_token,
             on_hot_encoding, labels, hts
         ) = batch
 
@@ -155,12 +155,12 @@ def evaluate(args, model, features, tag='test'):
                     'attention_mask': input_mask.to(args.device),
                     'entity_pos': batch_entity_pos,
                     'sent_pos': batch_sent_pos,
-                    'virtual_pos': batch_virtual_pos,
+                    'token_pos': batch_token_pos,
                     'graph': graph.to(args.device),
                     'num_mention': num_mention,
                     'num_entity': num_entity,
                     'num_sent': num_sent,
-                    'num_virtual': num_virtual,
+                    'num_token': num_token,
                     'on_hot_encoding' : on_hot_encoding.to(args.device),
                     'labels': labels,
                     'hts': hts,
