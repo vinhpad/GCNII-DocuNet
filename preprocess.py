@@ -42,13 +42,6 @@ class ReadDataset:
 
 
 def read_docred(file_in, save_file, tokenizer, max_seq_length=1024):
-    # if os.path.exists(save_file):
-    #     with open(file=save_file, mode='rb') as fr:
-    #         features = pickle.load(fr)
-    #         fr.close()
-    #     print('load preprocessed data from {}.'.format(save_file))
-    #     return features
-    # else:
     i_line = 0
     pos_samples = 0
     neg_samples = 0
@@ -70,6 +63,7 @@ def read_docred(file_in, save_file, tokenizer, max_seq_length=1024):
                 pos = mention["pos"]
                 entity_start.append((sent_id, pos[0],))
                 entity_end.append((sent_id, pos[1] - 1,))
+                
         for i_s, sent in enumerate(sample['sents']):
             start_sent = len(sents)
             sents.append('[SENT]')
@@ -133,16 +127,15 @@ def read_docred(file_in, save_file, tokenizer, max_seq_length=1024):
         input_ids = tokenizer.build_inputs_with_special_tokens(input_ids)
 
         i_line += 1
-        feature = {'input_ids': input_ids,
-                'entity_pos': entity_pos,
-                'labels': relations,
-                'hts': hts,
-                'title': sample['title'],
-                'sent_pos': sent_pos
-                }
+        feature = {
+            'input_ids': input_ids,
+            'entity_pos': entity_pos,
+            'labels': relations,
+            'hts': hts,
+            'title': sample['title'],
+            'sent_pos': sent_pos
+        }
         features.append(feature)
-        # with open(file=save_file, mode='wb') as fw:
-        #     pickle.dump(features, fw)
 
     print("# of documents {}.".format(i_line))
     print("# of positive examples {}.".format(pos_samples))
@@ -196,6 +189,7 @@ def read_cdr(file_in, save_file, tokenizer, max_seq_length=1024) -> List[Any]:
                     new_sents = []
                     sent_map = {}
                     sent_pos = []
+                    
                     i_t = 0
                     for sent in sents:
                         start_sent = len(new_sents)
@@ -215,6 +209,18 @@ def read_cdr(file_in, save_file, tokenizer, max_seq_length=1024) -> List[Any]:
                         sent_map[i_t] = len(new_sents)
                         new_sents.append('[/SENT]')
                     sents = new_sents
+
+                    token_pos = []
+                    in_entity_now = False
+                    for (token_id, token) in enumerate(new_sents):
+                        if token != '[SENT]' and token != '[/SENT]':
+                            if token == '[ENTITY]':
+                                in_entity_now = True
+                            if not(in_entity_now):
+                                token_pos.append(token_id)
+                            if token == '[/ENTITY]':
+                                in_entity_now = False
+                    
                     entity_pos = []
                     for p in prs:
                         if p[0] == "not_include":
@@ -238,7 +244,7 @@ def read_cdr(file_in, save_file, tokenizer, max_seq_length=1024) -> List[Any]:
                         t_end = [sent_map[idx] for idx in t_end]
                         if h_id not in ent2idx:
                             ent2idx[h_id] = len(ent2idx)
-                            entity_pos.append(list(zip(h_start, h_end)))
+                            entity_pos.append(list(zip(h_start, h_end )))
                         if t_id not in ent2idx:
                             ent2idx[t_id] = len(ent2idx)
                             entity_pos.append(list(zip(t_start, t_end)))
@@ -257,15 +263,18 @@ def read_cdr(file_in, save_file, tokenizer, max_seq_length=1024) -> List[Any]:
                         # print(h, t, rel)
                         relations.append(relation)
                         hts.append([h, t])
+                    
 
                 maxlen = max(maxlen, len(sents))
                 sents = sents[:max_seq_length - 2]
                 input_ids = tokenizer.convert_tokens_to_ids(sents)
                 input_ids = tokenizer.build_inputs_with_special_tokens(input_ids)
+
                 if len(hts) > 0:
                     feature = {
                         'input_ids': input_ids,
                         'entity_pos': entity_pos,
+                        'token_pos': token_pos,
                         'labels': relations,
                         'hts': hts,
                         'title': pmid,
@@ -343,6 +352,17 @@ def read_gda(file_in, save_file, tokenizer, max_seq_length=1024):
                         new_sents.append('[/SENT]')
                     sents = new_sents
 
+                    token_pos = []
+                    in_entity_now = False
+                    for (token_id, token) in enumerate(new_sents):
+                        if token != '[SENT]' and token != '[/SENT]':
+                            if token == '[ENTITY]':
+                                in_entity_now = True
+                            if not(in_entity_now):
+                                token_pos.append(token_id)
+                            if token == '[/ENTITY]':
+                                in_entity_now = False
+                    
                     entity_pos = []
 
                     for p in prs:
@@ -391,15 +411,17 @@ def read_gda(file_in, save_file, tokenizer, max_seq_length=1024):
                 sents = sents[:max_seq_length - 2]
                 input_ids = tokenizer.convert_tokens_to_ids(sents)
                 input_ids = tokenizer.build_inputs_with_special_tokens(input_ids)
-
+            
                 if len(hts) > 0:
-                    feature = {'input_ids': input_ids,
-                            'entity_pos': [[pos for pos in list_pos if pos[1] < len(sents)] for list_pos in entity_pos],
-                            'labels': relations,
-                            'hts': hts,
-                            'title': pmid,
-                            'sent_pos': [pos for pos in sent_pos if pos[1] < len(sents)]
-                            }
+                    feature = {
+                        'input_ids': input_ids,
+                        'entity_pos': [[pos for pos in list_pos if pos[1] < len(sents)] for list_pos in entity_pos],
+                        'token_pos': token_pos,
+                        'sent_pos': [pos for pos in sent_pos if pos[1] < len(sents)],
+                        'labels': relations,
+                        'hts': hts,
+                        'title': pmid
+                    }
                     features.append(feature)
         with open(file=save_file, mode='wb') as fw:
             pickle.dump(features, fw)

@@ -34,8 +34,8 @@ def train(args, model, train_features, dev_features, test_features):
 
         log_step = 50
         total_loss = 0
-        total_altop_loss = 0
-        total_grace_loss = 0
+        # total_altop_loss = 0
+        # total_grace_loss = 0
         for epoch in tqdm(train_iterator):
             start_time = time.time()
             model.zero_grad()
@@ -44,33 +44,35 @@ def train(args, model, train_features, dev_features, test_features):
                 (
                     input_ids, input_mask,
                     batch_entity_pos, batch_sent_pos, batch_virtual_pos,
-                    graph, num_mention, num_entity, num_sent, num_virtual,
-                    labels, hts
+                    graph, num_mention, num_entity, num_sent, num_token, 
+                    on_hot_encoding, labels, hts
                 ) = batch
 
+                
                 inputs = {
                     'input_ids': input_ids.to(args.device),
                     'attention_mask': input_mask.to(args.device),
                     'entity_pos': batch_entity_pos,
                     'sent_pos': batch_sent_pos,
-                    'virtual_pos': batch_virtual_pos,
+                    'token_pos': batch_virtual_pos,
                     'graph': graph.to(args.device),
                     'num_mention': num_mention,
                     'num_entity': num_entity,
                     'num_sent': num_sent,
-                    'num_virtual': num_virtual,
+                    'num_token': num_token,
+                    'on_hot_encoding' : on_hot_encoding.to(args.device),
                     'labels': labels,
                     'hts': hts,
                 }
                 outputs = model(**inputs)
                 loss = outputs[0] / args.gradient_accumulation_steps
-                altop_loss = outputs[1] / args.gradient_accumulation_steps
-                grace_loss = outputs[2] / args.gradient_accumulation_steps
+                # altop_loss = outputs[1] / args.gradient_accumulation_steps
+                # grace_loss = outputs[2] / args.gradient_accumulation_steps
                 
                 loss.backward()
                 total_loss += loss.item()
-                total_altop_loss += altop_loss.item()
-                total_grace_loss += grace_loss.item()
+                # total_altop_loss += altop_loss.item()
+                # total_grace_loss += grace_loss.item()
                 
                 if step % args.gradient_accumulation_steps == 0:
                     
@@ -84,18 +86,18 @@ def train(args, model, train_features, dev_features, test_features):
                     
                     if num_steps % log_step == 0:
                         cur_loss = total_loss / log_step
-                        altop_loss = total_altop_loss / log_step
-                        grace_loss = total_grace_loss / log_step
+                        # altop_loss = total_altop_loss / log_step
+                        # grace_loss = total_grace_loss / log_step
 
                         elapsed = time.time() - start_time
 
                         logger.info(
                            '| epoch {:2d} | step {:4d} | min/b {:5.2f} | lr {} | train loss {:5.3f} | altop loss {:5.3f} | grace loss {:5.3f}'.format(
-                               epoch, num_steps, elapsed / 60, scheduler.get_lr(), cur_loss, altop_loss, grace_loss))
+                               epoch, num_steps, elapsed / 60, scheduler.get_lr(), cur_loss, 0, 0))
 
                         total_loss = 0
-                        total_altop_loss = 0
-                        total_grace_loss = 0
+                        # total_altop_loss = 0
+                        # total_grace_loss = 0
                         start_time = time.time()
 
                 if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
@@ -146,7 +148,7 @@ def evaluate(args, model, features, tag='test'):
             input_ids, input_mask,
             batch_entity_pos, batch_sent_pos, batch_virtual_pos,
             graph, num_mention, num_entity, num_sent, num_virtual,
-            labels, hts
+            on_hot_encoding, labels, hts
         ) = batch
 
         inputs = {'input_ids': input_ids.to(args.device),
@@ -159,6 +161,7 @@ def evaluate(args, model, features, tag='test'):
                     'num_entity': num_entity,
                     'num_sent': num_sent,
                     'num_virtual': num_virtual,
+                    'on_hot_encoding' : on_hot_encoding.to(args.device),
                     'labels': labels,
                     'hts': hts,
                 }
@@ -200,17 +203,17 @@ def main():
     parser.add_argument("--load_path", default="", type=str)
 
     parser.add_argument("--gnn_config_file", default="config_file/gnn_config.json", type=str,
-                        help="Config gnn model")
+        help="Config gnn model")
 
     parser.add_argument("--config_name", default="", type=str,
-                        help="Pretrained config name or path if not the same as model_name")
+        help="Pretrained config name or path if not the same as model_name")
 
     parser.add_argument("--tokenizer_name", default="", type=str,
-                        help="Pretrained tokenizer name or path if not the same as model_name")
+        help="Pretrained tokenizer name or path if not the same as model_name")
 
     parser.add_argument("--max_seq_length", default=1024, type=int,
                         help="The maximum total input sequence length after tokenization. Sequences longer "
-                             "than this will be truncated, sequences shorter will be padded.")
+                        "than this will be truncated, sequences shorter will be padded.")
     
     parser.add_argument("--evaluation_steps", default=-1, type=int)
 
