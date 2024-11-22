@@ -2,7 +2,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 if true; then
 type="d"
-bs=1
+bs=8
 bl=3e-5
 uls=(2e-5)
 accum=1
@@ -27,7 +27,7 @@ for seed in ${seeds[@]}
     --learning_rate $ul \
     --max_grad_norm 1.0 \
     --warmup_ratio 0.06 \
-    --num_train_epochs 20 \
+    --num_train_epochs 30 \
     --tau 0.7 \
     --gnn_num_layer 4 \
     --seed $seed \

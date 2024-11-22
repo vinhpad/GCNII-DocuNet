@@ -6,7 +6,7 @@ import time
 from collate.collator import *
 from tqdm import tqdm
 from preprocess import *
-from logger import logger
+from logger import *
 from models.model import DocREModel
 from torch.utils.data import *
 from torch.optim import AdamW
@@ -269,6 +269,7 @@ def main():
 
     args.device = device
     logger.info(f'Using device: {device}!')
+    setup_log_path(args.log_dir)
 
     # Using SciBert
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
