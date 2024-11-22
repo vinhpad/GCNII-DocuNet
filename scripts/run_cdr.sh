@@ -32,8 +32,8 @@ for seed in ${seeds[@]}
     --gnn_num_layer 4 \
     --seed $seed \
     --num_class 2 \
-    --save_path output/checkpoints/cdr/train_scibert-lr${bl}_accum${accum}_unet-lr${ul}_bs${bs}.pt \
-    --log_dir output/logs/cdr/train_scibert-lr${bl}_accum${accum}_unet-lr${ul}_bs${bs}.log
+    --save_path checkpoints/cdr/train_scibert-lr${bl}_accum${accum}_unet-lr${ul}_bs${bs}.pt \
+    --log_dir logs/cdr/train_scibert-lr${bl}_accum${accum}_unet-lr${ul}_bs${bs}.log
   done
 done
 fi
