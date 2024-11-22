@@ -8,12 +8,11 @@ from opt_einsum import contract
 from .gnn import GNN
 from models.attn_unet import AttentionUNet
 from utils import process_long_input
-from .grace import GRACE
 import torch.nn.functional as F
 
 
 class DocREModel(nn.Module):
-    def __init__(self, args, bert_model, emb_size=768, block_size=64, num_labels=-1):
+    def __init__(self, args, bert_model, emb_size=1024, block_size=64, num_labels=-1):
         super().__init__()
         
         # BERT model config
@@ -24,7 +23,9 @@ class DocREModel(nn.Module):
 
         
         # graph neural network model config
-        self.gnn_hidden_size = self.bert_hidden_size + args.gnn_node_type_embedding
+        self.gnn_hidden_size = self.bert_hidden_size
+        self.gnn_node_type_embedding = args.gnn_node_type_embedding
+        
         self.gnn = GNN(
             num_node_type=args.gnn_num_node_type, 
             node_type_embedding=args.gnn_node_type_embedding,
@@ -32,20 +33,13 @@ class DocREModel(nn.Module):
             device=args.device
         )
         
-        # GRACE model config
-        # self.edge_drop_prob_first = args.edge_prob_first
-        # self.edge_drop_prob_second = args.edge_prob_second
-        # self.grace_model = GRACE(
-        #     encoder=None,
-        #     num_hidden = self.gnn_hidden_size, 
-        #     num_proj_hidden=args.grace_projection_hidden_feat_dim, 
-        #     tau=args.tau
-        # ).to(args.device)
-        
         # Unet config
         self.unet_in_dim = args.unet_in_dim
         self.unet_out_dim = args.unet_in_dim
         self.liner = nn.Linear(self.bert_hidden_size, args.unet_in_dim)
+        
+        
+        
         self.min_height = args.max_height
         self.channel_type = args.channel_type
         self.segmentation_net = AttentionUNet(input_channels=args.unet_in_dim,
@@ -53,9 +47,13 @@ class DocREModel(nn.Module):
                                               down_channel=args.down_dim)
         
         # Model config
-        self.head_extractor = nn.Linear(self.gnn_hidden_size * 2 + args.gnn_num_node_type + self.bert_hidden_size , emb_size)
-        self.tail_extractor = nn.Linear(self.gnn_hidden_size * 2 + args.gnn_num_node_type + self.bert_hidden_size , emb_size)
-        self.binary_linear = nn.Linear(emb_size * block_size, self.bert_config.num_labels)
+        self.head_extractor = nn.Linear(self.gnn_hidden_size * 2 + args.gnn_num_node_type + args.gnn_node_type_embedding + self.bert_hidden_size , emb_size)
+        self.tail_extractor = nn.Linear(self.gnn_hidden_size * 2 + args.gnn_num_node_type + args.gnn_node_type_embedding + self.bert_hidden_size , emb_size)
+        
+        self.liner1 = nn.Linear(emb_size, emb_size * 2)
+        self.liner2 = nn.Linear(emb_size * 2, emb_size)
+        self.binary_linear = nn.Linear(emb_size  * block_size, self.bert_config.num_labels)
+        
         self.num_labels = num_labels
         self.emb_size = emb_size
         self.block_size = block_size
@@ -212,12 +210,12 @@ class DocREModel(nn.Module):
         attention_mask,
         entity_pos, 
         sent_pos, 
-        token_pos,
+        # token_pos,
         graph, 
         num_mention, 
         num_entity, 
         num_sent, 
-        num_token,
+        # num_token,
         on_hot_encoding,
         labels=None, 
         hts=None
@@ -228,13 +226,9 @@ class DocREModel(nn.Module):
         mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
         entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
         sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
-        token_embed = self.get_token_embed(sequence_output, token_pos, num_token)
+        # token_embed = self.get_token_embed(sequence_output, token_pos, num_token)
 
-        print(mention_embed.shape)
-        print(entity_embed.shape)
-        print(sent_embed.shape)
-        print(token_embed.shape)
-        entity_hidden_state, _ = self.gnn([on_hot_encoding, mention_embed, entity_embed, sent_embed, token_embed, graph])
+        entity_hidden_state, _ = self.gnn([on_hot_encoding, mention_embed, entity_embed, sent_embed, graph])
         
         local_context = self.get_hrt(sequence_output, attention, entity_pos, hts)
         s_embed, t_embed = self.get_pair_entity_embed(entity_hidden_state, hts)
@@ -268,13 +262,15 @@ class DocREModel(nn.Module):
 
         
         h_t = self.get_ht (attn_map, hts)
-        print(h_t.shape)
-        print(s_embed.shape)
+
         s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t], dim=1)))
         t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t], dim=1)))
+
         b1 = s_embed.view(-1, self.emb_size // self.block_size, self.block_size)
         b2 = t_embed.view(-1, self.emb_size // self.block_size, self.block_size)
+
         bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
+        # bl = self.liner2(self.liner1(s_embed) * t_embed)
         logits = self.binary_linear(bl)
 
         output = (self.loss_fnt.get_label(logits, num_labels=self.num_labels),)

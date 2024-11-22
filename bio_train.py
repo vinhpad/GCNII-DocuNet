@@ -1,9 +1,9 @@
 import argparse
 import os.path
+import random
 import time
+
 from collate.collator import *
-
-
 from tqdm import tqdm
 from preprocess import *
 from logger import logger
@@ -34,8 +34,7 @@ def train(args, model, train_features, dev_features, test_features):
 
         log_step = 50
         total_loss = 0
-        # total_altop_loss = 0
-        # total_grace_loss = 0
+        
         for epoch in tqdm(train_iterator):
             start_time = time.time()
             model.zero_grad()
@@ -43,8 +42,8 @@ def train(args, model, train_features, dev_features, test_features):
                 model.train()
                 (
                     input_ids, input_mask,
-                    batch_entity_pos, batch_sent_pos, batch_virtual_pos,
-                    graph, num_mention, num_entity, num_sent, num_token, 
+                    batch_entity_pos, batch_sent_pos,
+                    graph, num_mention, num_entity, num_sent, 
                     on_hot_encoding, labels, hts
                 ) = batch
 
@@ -54,28 +53,22 @@ def train(args, model, train_features, dev_features, test_features):
                     'attention_mask': input_mask.to(args.device),
                     'entity_pos': batch_entity_pos,
                     'sent_pos': batch_sent_pos,
-                    'token_pos': batch_virtual_pos,
+                    # 'token_pos': batch_virtual_pos,
                     'graph': graph.to(args.device),
                     'num_mention': num_mention,
                     'num_entity': num_entity,
                     'num_sent': num_sent,
-                    'num_token': num_token,
+                    # 'num_token': num_token,
                     'on_hot_encoding' : on_hot_encoding.to(args.device),
                     'labels': labels,
                     'hts': hts,
                 }
                 outputs = model(**inputs)
                 loss = outputs[0] / args.gradient_accumulation_steps
-                # altop_loss = outputs[1] / args.gradient_accumulation_steps
-                # grace_loss = outputs[2] / args.gradient_accumulation_steps
-                
                 loss.backward()
                 total_loss += loss.item()
-                # total_altop_loss += altop_loss.item()
-                # total_grace_loss += grace_loss.item()
                 
                 if step % args.gradient_accumulation_steps == 0:
-                    
                     if args.max_grad_norm > 0:
                         torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
@@ -86,18 +79,11 @@ def train(args, model, train_features, dev_features, test_features):
                     
                     if num_steps % log_step == 0:
                         cur_loss = total_loss / log_step
-                        # altop_loss = total_altop_loss / log_step
-                        # grace_loss = total_grace_loss / log_step
-
                         elapsed = time.time() - start_time
-
                         logger.info(
                            '| epoch {:2d} | step {:4d} | min/b {:5.2f} | lr {} | train loss {:5.3f} | altop loss {:5.3f} | grace loss {:5.3f}'.format(
                                epoch, num_steps, elapsed / 60, scheduler.get_lr(), cur_loss, 0, 0))
-
                         total_loss = 0
-                        # total_altop_loss = 0
-                        # total_grace_loss = 0
                         start_time = time.time()
 
                 if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
@@ -106,6 +92,7 @@ def train(args, model, train_features, dev_features, test_features):
                     _, test_output = evaluate(args, model, test_features, tag="test")
                     logger.info(
                         '| epoch {:3d} | time: {:5.2f}s | test_output:{}'.format(epoch, time.time() - eval_start_time, test_output))
+            
             if args.save_path != "":
                 torch.save({
                     'epoch': epoch,
@@ -132,9 +119,7 @@ def train(args, model, train_features, dev_features, test_features):
     
     num_steps = 0
     model.zero_grad()
-    best_score = finetune(train_features, optimizer, args.num_train_epochs, num_steps)
-    print(best_score)
-    return best_score
+    finetune(train_features, optimizer, args.num_train_epochs, num_steps)
     
 
 def evaluate(args, model, features, tag='test'):
@@ -146,8 +131,8 @@ def evaluate(args, model, features, tag='test'):
         model.eval()
         (
             input_ids, input_mask,
-            batch_entity_pos, batch_sent_pos, batch_token_pos,
-            graph, num_mention, num_entity, num_sent, num_token,
+            batch_entity_pos, batch_sent_pos,
+            graph, num_mention, num_entity, num_sent,
             on_hot_encoding, labels, hts
         ) = batch
 
@@ -155,12 +140,12 @@ def evaluate(args, model, features, tag='test'):
                     'attention_mask': input_mask.to(args.device),
                     'entity_pos': batch_entity_pos,
                     'sent_pos': batch_sent_pos,
-                    'token_pos': batch_token_pos,
+                    # 'token_pos': batch_token_pos,
                     'graph': graph.to(args.device),
                     'num_mention': num_mention,
                     'num_entity': num_entity,
                     'num_sent': num_sent,
-                    'num_token': num_token,
+                    # 'num_token': num_token,
                     'on_hot_encoding' : on_hot_encoding.to(args.device),
                     'labels': labels,
                     'hts': hts,
@@ -168,7 +153,7 @@ def evaluate(args, model, features, tag='test'):
 
         with torch.no_grad():
             output = model(**inputs)
-            loss = output[0]
+            # loss = output[0]
             pred = output[-1].cpu().numpy()
             pred[np.isnan(pred)] = 0
             preds.append(pred)
@@ -263,7 +248,7 @@ def main():
 
     
     parser.add_argument("--gnn_num_layer", type=int, default=4)
-    parser.add_argument("--gnn_num_node_type", type=int, default=4)
+    parser.add_argument("--gnn_num_node_type", type=int, default=3)
     parser.add_argument("--gnn_node_type_embedding", type=int, default=50)
     parser.add_argument("--gnn_hidden_feat_dim", type=int, default=256)
 
@@ -320,10 +305,8 @@ def main():
         config=bert_config
     )
 
-    bert_model.resize_token_embeddings(len(tokenizer))
-    
+    bert_model.resize_token_embeddings(len(tokenizer))    
     args.bert_config = bert_config
-    
 
     set_seed(args.seed)
     model = DocREModel(args, bert_model, num_labels=args.num_labels)

@@ -1,8 +1,7 @@
 import dgl
-from .graph_builder_utils import *
 import torch
-import networkx as nx
 import numpy as np
+from .graph_builder_utils import *
 
 class GraphBuilder:
     def __init__(self,
@@ -17,15 +16,15 @@ class GraphBuilder:
         num_mention = max([sum([len(ent_pos) for ent_pos in entity_pos]) for entity_pos in batch_entity_pos])
         num_entity = max([len(entity_pos) for entity_pos in batch_entity_pos])
         num_sent = max([len(sent_pos) for sent_pos in batch_sent_pos])
-        num_token = max([len(token_pos) for token_pos in batch_token_pos])
+        # num_token = max([len(token_pos) for token_pos in batch_token_pos])
 
         mention_to_mention_edges = get_mention_to_mention_edges(num_mention, batch_entity_pos)
         sentence_to_sentence_edges = get_sentence_to_sentence_edges(num_sent, batch_sent_pos)
         mention_to_sentence_edges = get_mention_to_sentence_edges(num_mention, num_sent, batch_sent_pos, batch_entity_pos)
         mention_to_entity_edges = get_mention_to_entity_edges(num_mention, num_entity, batch_entity_pos)
         entity_to_sentence_edges = get_entity_to_sentence_edges(num_entity, num_sent, batch_sent_pos, batch_entity_pos)
-        token_to_sent_edges = get_token_to_sent_edges(num_token, num_sent, batch_token_pos, batch_sent_pos)
-        token_to_mention_edges = get_token_to_mention_edges(num_mention, num_token, batch_entity_pos, batch_token_pos)
+        # token_to_sent_edges = get_token_to_sent_edges(num_token, num_sent, batch_token_pos, batch_sent_pos)
+        # token_to_mention_edges = get_token_to_mention_edges(num_mention, num_token, batch_entity_pos, batch_token_pos)
 
         u = []
         v = []
@@ -36,8 +35,8 @@ class GraphBuilder:
         def get_new_sent_id(origin_sent_id):
             return num_mention * batch_size + num_entity * batch_size + origin_sent_id
         
-        def get_new_token_id(origin_token_id):
-            return num_mention * batch_size + num_entity * batch_size + num_sent * batch_size + origin_token_id
+        # def get_new_token_id(origin_token_id):
+        #     return num_mention * batch_size + num_entity * batch_size + num_sent * batch_size + origin_token_id
 
         edge_u, edge_v = mention_to_mention_edges
         for edge_id in range(len(edge_u)):
@@ -73,26 +72,25 @@ class GraphBuilder:
                 u.append(get_new_sent_id(edge_v[edge_id]))
                 v.append(get_new_entity_id(edge_u[edge_id]))
 
-        edge_u, edge_v = token_to_mention_edges
-        for edge_id in range(len(edge_u)):
-            u.append(get_new_token_id(edge_u[edge_id]))
-            v.append(edge_v[edge_id])
+        # edge_u, edge_v = token_to_mention_edges
+        # for edge_id in range(len(edge_u)):
+        #     u.append(get_new_token_id(edge_u[edge_id]))
+        #     v.append(edge_v[edge_id])
             
-            if self.create_undirected_edges:
-                u.append(edge_v[edge_id])
-                v.append(get_new_token_id(edge_u[edge_id]))
+        #     if self.create_undirected_edges:
+        #         u.append(edge_v[edge_id])
+        #         v.append(get_new_token_id(edge_u[edge_id]))
 
-        edge_u, edge_v = token_to_sent_edges
-        for edge_id in range(len(edge_u)):
-            u.append(get_new_token_id(edge_u[edge_id]))
-            v.append(get_new_sent_id(edge_v[edge_id]))
+        # edge_u, edge_v = token_to_sent_edges
+        # for edge_id in range(len(edge_u)):
+        #     u.append(get_new_token_id(edge_u[edge_id]))
+        #     v.append(get_new_sent_id(edge_v[edge_id]))
             
-            if self.create_undirected_edges:
-                u.append(get_new_sent_id(edge_v[edge_id]))
-                v.append(get_new_token_id(edge_u[edge_id]))
+        #     if self.create_undirected_edges:
+        #         u.append(get_new_sent_id(edge_v[edge_id]))
+        #         v.append(get_new_token_id(edge_u[edge_id]))
 
-        num_nodes=(num_mention * batch_size + num_entity * batch_size 
-                   + num_sent * batch_size + num_token * batch_size)
+        num_nodes = num_mention * batch_size  + num_entity * batch_size + num_sent * batch_size # + num_token * batch_size
 
         for edge_id in range(len(u)):
             assert u[edge_id] != v[edge_id], f"Exist self edge {u[edge_id]} to {v[edge_id]}"
@@ -107,4 +105,5 @@ class GraphBuilder:
         
         if self.add_self_edge:
             graph = dgl.add_self_loop(graph)
-        return graph, num_mention, num_entity, num_sent, num_token, one_hot_encoding
+            
+        return graph, num_mention, num_entity, num_sent, one_hot_encoding
