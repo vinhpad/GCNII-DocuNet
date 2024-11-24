@@ -114,6 +114,7 @@ def train(args, model, train_features, dev_features, test_features):
                 , _use_new_zipfile_serialization=False)
                 
     new_layer = ["extractor", "bilinear", "graph"]
+    
     optimizer_grouped_parameters = [
         {"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in new_layer)], },
         {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in new_layer)], "lr": 1e4},
@@ -255,7 +256,7 @@ def main():
     
     
     parser.add_argument("--use_graph", type=bool, default=True)
-    parser.add_argument("--gnn_num_layer", type=int, default=4)
+    parser.add_argument("--gnn_num_layer", type=int, default=1)
     parser.add_argument("--gnn_num_node_type", type=int, default=2)
     parser.add_argument("--gnn_hidden_feat_dim", type=int, default=256)
     

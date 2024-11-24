@@ -1,7 +1,7 @@
 export CUDA_VISIBLE_DEVICES=0
 
 if true; then
-bs=1
+bs=2
 bl=3e-5
 uls=(2e-5)
 accum=1
@@ -26,7 +26,7 @@ for seed in ${seeds[@]}
     --max_grad_norm 1.0 \
     --warmup_ratio 0.06 \
     --num_train_epochs 20 \
-    --gnn_num_layer 4 \
+    --gnn_num_layer 1 \
     --seed $seed \
     --num_class 2 \
     --save_path checkpoints/cdr/train_scibert-lr${bl}_accum${accum}_unet-lr${ul}_bs${bs}.pt \

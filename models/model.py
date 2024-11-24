@@ -25,7 +25,13 @@ class DocREModel(nn.Module):
 
         # self.gnn_hidden_size = self.bert_hidden_size + args.gnn_node_type_embedding
 
-        self.edges = ['self-loop', 'co-reference', 'inter-entity', 'mention-sent', 'sentence-sentence']
+        self.edges = [
+            'self-loop', 
+            'sentence-sentence',
+            'mention-sent',
+            'co-reference', 
+            'inter-entity'
+        ]
 
         if self.use_graph:
             self.graph_layers = nn.ModuleList(
@@ -204,53 +210,59 @@ class DocREModel(nn.Module):
         map_rss = torch.cat(map_rss, dim=0).reshape(bs, ne, ne, d)
         return map_rss
 
-    def graph(self, sequence_output, graphs, attention, batch_entity_pos, batch_mention_embed, batch_sent_embed, hts):
-        n, h, _, c = attention.size()
-
+    def graph(self, 
+            sequence_output, 
+            graphs, 
+            batch_entity_pos, 
+            batch_sent_pos, 
+            batch_mention_embed, 
+            batch_sent_embed, 
+            num_entities, 
+            hts
+        ):
+        batch_size, _, embed_dim = sequence_output.shape
+     
         max_node = max([len(graph) for graph in graphs])
+        num_entity = max([num_ent for num_ent in num_entities])
+        graph_fea = torch.zeros(batch_size, max_node, self.bert_config.hidden_size, device=self.device)
+        graph_adj = torch.zeros(batch_size, max_node, max_node, device=self.device)
         
-        graph_fea = torch.zeros(n, max_node, self.bert_config.hidden_size, device=self.device)
-        graph_adj = torch.zeros(n, max_node, max_node, device=self.device)
-
+        
         for i, graph in enumerate(graphs):
             nodes_num = len(graph)
-            # print(graph)
+            num_mention = sum([len(mention_pos) for mention_pos in batch_entity_pos[i]])
+
+            # print(graph.shape)
+            
             for vertex_i in range(nodes_num):
                 for vertex_j in range(nodes_num):
                     graph_adj[i][vertex_i][vertex_j] = graph[vertex_i][vertex_j]
 
-        for batch_id in range(n):
-            mention_embed = batch_mention_embed[batch_id]
+            mention_embed = batch_mention_embed[i]
             for mention_id in range(len(mention_embed)):
-                graph_fea[batch_id][mention_id] = mention_embed[mention_id]
+                graph_fea[i][mention_id] = mention_embed[mention_id]
             
-            sent_embed = batch_sent_embed[batch_id]
-            for sent_id in range(len(sent_embed)):
-                graph_fea[batch_id][sent_id] = sent_embed[sent_id]
+            sent_embed = batch_sent_embed[i]
+            for sent_id in range(len(batch_sent_pos[i])):
+                graph_fea[i][num_mention + sent_id] = sent_embed[sent_id]
 
-        for graph_layer in self.graph_layers:
+    
+        for _, graph_layer in enumerate(self.graph_layers):
             graph_fea, _ = graph_layer(graph_fea.to(self.device), graph_adj.to(self.device))
+
         
-        h_entity, t_entity = [], []
-        for i in range(len(batch_entity_pos)):
-            entity_embs = []
-            mention_index = 0
-            for e in batch_entity_pos[i]:
-                e_emb = graph_fea[i, mention_index:mention_index + len(e), :]
-                mention_index += len(e)
+        batch_entity_embeds = torch.zeros((batch_size, num_entity, embed_dim)).to(self.device)
+        for i in range(batch_size):
+        
+            e_emb = []
+            for ent_id, e in enumerate(batch_entity_pos[i]):
+                for mention_id, _ in enumerate(e):
+                    mention_embed = graph_fea[i][mention_id]
 
-                e_emb = torch.logsumexp(e_emb, dim=0) if len(e) > 1 else e_emb.squeeze(0)
-                entity_embs.append(e_emb)
+                e_emb.append(mention_embed)
+                batch_entity_embeds[i, ent_id] = torch.logsumexp(torch.stack(e_emb, dim=0), dim=0)
 
-            entity_embs = torch.stack(entity_embs, dim=0)
-            ht_i = torch.LongTensor(hts[i]).to(sequence_output.device)
-            hs = torch.index_select(entity_embs, 0, ht_i[:, 0])
-            ts = torch.index_select(entity_embs, 0, ht_i[:, 1])
-            h_entity.append(hs)
-            t_entity.append(ts)
-
-        h_entity = torch.cat(h_entity, dim=0)
-        t_entity = torch.cat(t_entity, dim=0)
+        h_entity, t_entity = self.get_pair_entity_embed(batch_entity_embeds, hts)
         return h_entity, t_entity
 
     def forward(
@@ -270,13 +282,14 @@ class DocREModel(nn.Module):
         sequence_output, attention = self.encode(input_ids, attention_mask)
         mention_embed = self.get_mention_embed(sequence_output, batch_entity_pos, num_mentions)
         entity_embed = self.get_entity_embed(sequence_output, batch_entity_pos, num_entities)
+ 
         sent_embed = self.get_sent_embed(sequence_output, batch_sent_pos, num_sents)
 
         local_context = self.get_hrt(sequence_output, attention, batch_entity_pos, hts)
         s_embed, t_embed = self.get_pair_entity_embed(entity_embed, hts)
 
         if self.use_unet:
-            feature_map = self.get_channel_map(sequence_output, attn_input)
+            feature_map = self.get_channel_map(sequence_output, local_context)
             attn_input = self.liner(feature_map).permute(0, 3, 1, 2).contiguous()
             attn_map = self.segmentation_net(attn_input)
         else:
@@ -288,17 +301,19 @@ class DocREModel(nn.Module):
             s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t], dim=1)))
             t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t], dim=1)))
         else:
-            s_embed_enhance, t_embed_enhance = self.graph(
-                sequence_output, 
+            s_embed_enhance, t_embed_enhance = self.graph( 
+                sequence_output,
                 graphs, 
-                attention, 
                 batch_entity_pos, 
+                batch_sent_pos,
                 mention_embed, 
                 sent_embed, 
+                num_entities,
                 hts
             )
             s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t, s_embed_enhance], dim=1)))
             t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t, t_embed_enhance], dim=1))) 
+  
 
         b1 = s_embed.view(-1, self.emb_size // self.block_size, self.block_size)
         b2 = t_embed.view(-1, self.emb_size // self.block_size, self.block_size)

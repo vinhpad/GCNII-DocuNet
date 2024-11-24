@@ -10,7 +10,7 @@ class MultiHeadDotProductAttention(nn.Module):
 
         self.h = n_heads
         
-        self.d_k = out_features // 2
+        self.d_k = out_features // n_heads
 
         self.edges = edges
         
@@ -73,8 +73,10 @@ class AttentionGCNLayer(nn.Module):
         super(AttentionGCNLayer, self).__init__()
         self.nhead = nhead
         self.graph_attention = MultiHeadDotProductAttention(edges, input_size, input_size, self.nhead, attn_drop)
+        
         self.gcn_layers = nn.Sequential(
             *[GraphConvolutionLayer(input_size, input_size, graph_drop) for _ in range(iters)])
+        
         self.blocks = nn.ModuleList([self.gcn_layers for _ in range(self.nhead)])
 
         self.aggregate_W = nn.Linear(input_size * nhead, input_size)
