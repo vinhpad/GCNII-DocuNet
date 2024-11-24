@@ -209,17 +209,6 @@ def read_cdr(file_in, save_file, tokenizer, max_seq_length=1024) -> List[Any]:
                         sent_map[i_t] = len(new_sents)
                         new_sents.append('[/SENT]')
                     sents = new_sents
-
-                    token_pos = []
-                    in_entity_now = False
-                    for (token_id, token) in enumerate(new_sents):
-                        if token != '[SENT]' and token != '[/SENT]':
-                            if token == '[ENTITY]':
-                                in_entity_now = True
-                            if not(in_entity_now):
-                                token_pos.append(token_id)
-                            if token == '[/ENTITY]':
-                                in_entity_now = False
                     
                     entity_pos = []
                     for p in prs:
@@ -404,7 +393,6 @@ def read_gda(file_in, save_file, tokenizer, max_seq_length=2048):
                     feature = {
                         'input_ids': input_ids,
                         'entity_pos': [[pos for pos in list_pos if pos[1] < len(sents)] for list_pos in entity_pos],
-                        'token_pos': token_pos,
                         'sent_pos': [pos for pos in sent_pos if pos[1] < len(sents)],
                         'labels': relations,
                         'hts': hts,

@@ -74,7 +74,8 @@ def train(args, model, train_features, dev_features, test_features):
                
                 loss.backward()
                 total_loss += loss.item()
-                
+                num_steps += 1
+
                 if step % args.gradient_accumulation_steps == 0:
                     
                     if args.max_grad_norm > 0:
@@ -82,21 +83,25 @@ def train(args, model, train_features, dev_features, test_features):
 
                     optimizer.step()
                     scheduler.step()
-                    model.zero_grad()
-                    num_steps += 1
+                    model.zero_grad()    
                     
                     if num_steps % log_step == 0:
                         cur_loss = total_loss / log_step
                         elapsed = time.time() - start_time
                         logger.info('| epoch {:2d} | step {:4d} | min/b {:5.2f} | lr {} | train loss {:5.3f}'
                                     .format(epoch, num_steps, elapsed / 60, scheduler.get_lr(), cur_loss))
+                        
+                        wandb.log({'loss' : cur_loss})
                         total_loss = 0
                         start_time = time.time()
 
-                if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
+                if step + 1 == len(train_dataloader) or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
                     eval_start_time = time.time()
                     # _, dev_output = evaluate(args, model, dev_features, tag="dev")
                     _, test_output = evaluate(args, model, test_features, tag="test")
+
+                    wandb.log({"Test-ouput": test_output})
+
                     logger.info('| epoch {:3d} | time: {:5.2f}s | test_output:{}'
                                 .format(epoch, time.time() - eval_start_time, test_output))
                     
@@ -108,13 +113,10 @@ def train(args, model, train_features, dev_features, test_features):
                 }, args.save_path
                 , _use_new_zipfile_serialization=False)
                 
-    extract_layer = ["extractor", "bilinear"]
-    bert_layer = ['bert_model']
-    
+    new_layer = ["extractor", "bilinear", "graph"]
     optimizer_grouped_parameters = [
-        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in bert_layer)], "lr": args.bert_lr},
-        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in extract_layer)], "lr": 1e-4},
-        {"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in extract_layer + bert_layer)]},
+        {"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in new_layer)], },
+        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in new_layer)], "lr": 1e4},
     ]
 
     optimizer = AdamW(

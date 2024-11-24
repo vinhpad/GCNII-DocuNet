@@ -1,7 +1,7 @@
 export CUDA_VISIBLE_DEVICES=0
 
 if true; then
-bs=2
+bs=1
 bl=3e-5
 uls=(2e-5)
 accum=1
