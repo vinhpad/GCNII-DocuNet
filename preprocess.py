@@ -274,7 +274,6 @@ def read_cdr(file_in, save_file, tokenizer, max_seq_length=1024) -> List[Any]:
                     feature = {
                         'input_ids': input_ids,
                         'entity_pos': entity_pos,
-                        'token_pos': token_pos,
                         'labels': relations,
                         'hts': hts,
                         'title': pmid,
@@ -288,7 +287,7 @@ def read_cdr(file_in, save_file, tokenizer, max_seq_length=1024) -> List[Any]:
         return features
 
 
-def read_gda(file_in, save_file, tokenizer, max_seq_length=1024):
+def read_gda(file_in, save_file, tokenizer, max_seq_length=2048):
     if os.path.exists(save_file):
         with open(file=save_file, mode='rb') as fr:
             features = pickle.load(fr)
@@ -351,17 +350,6 @@ def read_gda(file_in, save_file, tokenizer, max_seq_length=1024):
                         sent_map[i_t] = len(new_sents)
                         new_sents.append('[/SENT]')
                     sents = new_sents
-
-                    token_pos = []
-                    in_entity_now = False
-                    for (token_id, token) in enumerate(new_sents):
-                        if token != '[SENT]' and token != '[/SENT]':
-                            if token == '[ENTITY]':
-                                in_entity_now = True
-                            if not(in_entity_now):
-                                token_pos.append(token_id)
-                            if token == '[/ENTITY]':
-                                in_entity_now = False
                     
                     entity_pos = []
 

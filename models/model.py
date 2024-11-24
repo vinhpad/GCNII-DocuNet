@@ -1,60 +1,62 @@
 import torch
-import numpy as np
-import torch.nn.functional as F
 
 from torch import nn
-from models.losses import balanced_loss as ATLoss
 from opt_einsum import contract
-from .gnn import GNN
 from models.attn_unet import AttentionUNet
+from models.graph import AttentionGCNLayer
 from utils import process_long_input
-from .grace import GRACE
-import torch.nn.functional as F
 
+from models.losses import balanced_loss as ATLoss
 
 class DocREModel(nn.Module):
     def __init__(self, args, bert_model, emb_size=768, block_size=64, num_labels=-1):
         super().__init__()
         
+        self.use_graph = args.use_graph
+        self.use_unet = args.use_unet
+
         # BERT model config
         self.bert_model = bert_model
         self.bert_config = args.bert_config
         self.bert_drop = nn.Dropout(0.6)
         self.bert_hidden_size = args.bert_config.hidden_size
-
         
         # graph neural network model config
-        self.gnn_hidden_size = self.bert_hidden_size + args.gnn_node_type_embedding
-        self.gnn = GNN(
-            num_node_type=args.gnn_num_node_type, 
-            node_type_embedding=args.gnn_node_type_embedding,
-            hidden_feat_dim=self.gnn_hidden_size, 
-            device=args.device
+
+        # self.gnn_hidden_size = self.bert_hidden_size + args.gnn_node_type_embedding
+
+        self.edges = ['self-loop', 'co-reference', 'inter-entity', 'mention-sent', 'sentence-sentence']
+
+        if self.use_graph:
+            self.graph_layers = nn.ModuleList(
+                AttentionGCNLayer(
+                    self.edges, 
+                    self.bert_hidden_size, 
+                    nhead=args.gnn_num_node_type, 
+                    iters=args.gnn_num_layer
+                ) for _ in range(args.gnn_num_layer)
+            )
+
+        # Unet config
+        self.min_height = args.max_height
+        self.unet_in_dim = self.bert_hidden_size
+        self.unet_out_dim = self.bert_hidden_size
+
+        self.segmentation_net = AttentionUNet(
+            input_channels=self.unet_in_dim,
+            down_channel=args.down_dim,
+            output_channels=self.unet_out_dim,
         )
         
-        # GRACE model config
-        # self.edge_drop_prob_first = args.edge_prob_first
-        # self.edge_drop_prob_second = args.edge_prob_second
-        # self.grace_model = GRACE(
-        #     encoder=None,
-        #     num_hidden = self.gnn_hidden_size, 
-        #     num_proj_hidden=args.grace_projection_hidden_feat_dim, 
-        #     tau=args.tau
-        # ).to(args.device)
-        
-        # Unet config
-        self.unet_in_dim = args.unet_in_dim
-        self.unet_out_dim = args.unet_in_dim
-        self.liner = nn.Linear(self.bert_hidden_size, args.unet_in_dim)
-        self.min_height = args.max_height
-        self.channel_type = args.channel_type
-        self.segmentation_net = AttentionUNet(input_channels=args.unet_in_dim,
-                                              class_number=args.unet_out_dim,
-                                              down_channel=args.down_dim)
-        
         # Model config
-        self.head_extractor = nn.Linear(self.gnn_hidden_size * 2 + args.gnn_num_node_type + self.bert_hidden_size , emb_size)
-        self.tail_extractor = nn.Linear(self.gnn_hidden_size * 2 + args.gnn_num_node_type + self.bert_hidden_size , emb_size)
+
+        if args.use_graph:
+            self.head_extractor = nn.Linear( 3 * self.bert_hidden_size, emb_size)
+            self.tail_extractor = nn.Linear( 3 * self.bert_hidden_size, emb_size)
+        else: 
+            self.head_extractor = nn.Linear( 2 * self.bert_hidden_size, emb_size)
+            self.tail_extractor = nn.Linear( 2 * self.bert_hidden_size, emb_size)
+
         self.binary_linear = nn.Linear(emb_size * block_size, self.bert_config.num_labels)
         self.num_labels = num_labels
         self.emb_size = emb_size
@@ -68,6 +70,7 @@ class DocREModel(nn.Module):
         if config.transformer_type == "bert":
             start_tokens = [config.cls_token_id]
             end_tokens = [config.sep_token_id]
+        
         elif config.transformer_type == "roberta":
             start_tokens = [config.cls_token_id]
             end_tokens = [config.sep_token_id, config.sep_token_id]
@@ -76,27 +79,32 @@ class DocREModel(nn.Module):
             attention_mask, start_tokens, end_tokens)
         return sequence_output, attention
 
-    def get_sent_embed(self, sequence_output, batch_sent_pos, num_sent):
+    def get_sent_embed(self, sequence_output, batch_sent_pos, num_sents):
         batch_size, _, embed_dim = sequence_output.shape
+        num_sent = max([s for s in num_sents])
         sent_embed = torch.zeros((batch_size, num_sent, embed_dim)).to(self.device)
         for batch_id, sent_pos in enumerate(batch_sent_pos):
             for sent_id, pos in enumerate(sent_pos):
                 sent_embed[batch_id, sent_id] = sequence_output[batch_id, pos[0] + self.offset]
         return sent_embed
 
-    def get_mention_embed(self, sequence_output, batch_entity_pos, num_mention):
+    def get_mention_embed(self, sequence_output, batch_entity_pos, num_mentions):
         batch_size, _, embed_dim = sequence_output.shape
+        num_mention = max ([num_ment for num_ment in num_mentions])
         mention_embed = torch.zeros((batch_size, num_mention, embed_dim)).to(self.device)
+
         for batch_id, entity_pos in enumerate(batch_entity_pos):
             mention_id = 0
             for ent_pos in entity_pos:
                 for mention_pos in ent_pos:
                     mention_embed[batch_id, mention_id] = sequence_output[batch_id, mention_pos[0] + self.offset]
                     mention_id += 1
+        
         return mention_embed
 
-    def get_entity_embed(self, sequence_output, batch_entity_pos, num_entity):
+    def get_entity_embed(self, sequence_output, batch_entity_pos, num_entities):
         batch_size, _, embed_dim = sequence_output.shape
+        num_entity = max([num_ent for num_ent in num_entities])
         entity_embed = torch.zeros((batch_size, num_entity, embed_dim)).to(self.device)
         for batch_id, entity_pos in enumerate(batch_entity_pos):
             for entity_id, ent_pos in enumerate(entity_pos):
@@ -115,16 +123,6 @@ class DocREModel(nn.Module):
         s_embed = torch.stack(s_embed, dim=0)
         t_embed = torch.stack(t_embed, dim=0)
         return s_embed, t_embed
-
-
-    def get_token_embed(self, sequence_output, batch_token_pos, num_token):
-        batch_size, _, embed_dim = sequence_output.shape
-        token_embed = torch.zeros((batch_size, num_token, embed_dim)).to(self.device)
-        for batch_id, token_pos in enumerate(batch_token_pos):
-            for token_idx, tok_pos in enumerate(token_pos):
-                token_embed[batch_id][token_idx] = sequence_output[batch_id][tok_pos + self.offset]
-                
-        return token_embed
 
     def get_ht(self, rel_enco, hts):
         htss = []
@@ -206,72 +204,102 @@ class DocREModel(nn.Module):
         map_rss = torch.cat(map_rss, dim=0).reshape(bs, ne, ne, d)
         return map_rss
 
+    def graph(self, sequence_output, graphs, attention, batch_entity_pos, batch_mention_embed, batch_sent_embed, hts):
+        n, h, _, c = attention.size()
+
+        max_node = max([len(graph) for graph in graphs])
+        
+        graph_fea = torch.zeros(n, max_node, self.bert_config.hidden_size, device=self.device)
+        graph_adj = torch.zeros(n, max_node, max_node, device=self.device)
+
+        for i, graph in enumerate(graphs):
+            nodes_num = len(graph)
+            # print(graph)
+            for vertex_i in range(nodes_num):
+                for vertex_j in range(nodes_num):
+                    graph_adj[i][vertex_i][vertex_j] = graph[vertex_i][vertex_j]
+
+        for batch_id in range(n):
+            mention_embed = batch_mention_embed[batch_id]
+            for mention_id in range(len(mention_embed)):
+                graph_fea[batch_id][mention_id] = mention_embed[mention_id]
+            
+            sent_embed = batch_sent_embed[batch_id]
+            for sent_id in range(len(sent_embed)):
+                graph_fea[batch_id][sent_id] = sent_embed[sent_id]
+
+        for graph_layer in self.graph_layers:
+            graph_fea, _ = graph_layer(graph_fea.to(self.device), graph_adj.to(self.device))
+        
+        h_entity, t_entity = [], []
+        for i in range(len(batch_entity_pos)):
+            entity_embs = []
+            mention_index = 0
+            for e in batch_entity_pos[i]:
+                e_emb = graph_fea[i, mention_index:mention_index + len(e), :]
+                mention_index += len(e)
+
+                e_emb = torch.logsumexp(e_emb, dim=0) if len(e) > 1 else e_emb.squeeze(0)
+                entity_embs.append(e_emb)
+
+            entity_embs = torch.stack(entity_embs, dim=0)
+            ht_i = torch.LongTensor(hts[i]).to(sequence_output.device)
+            hs = torch.index_select(entity_embs, 0, ht_i[:, 0])
+            ts = torch.index_select(entity_embs, 0, ht_i[:, 1])
+            h_entity.append(hs)
+            t_entity.append(ts)
+
+        h_entity = torch.cat(h_entity, dim=0)
+        t_entity = torch.cat(t_entity, dim=0)
+        return h_entity, t_entity
+
     def forward(
         self, 
         input_ids, 
         attention_mask,
-        entity_pos, 
-        sent_pos, 
-        token_pos,
-        graph, 
-        num_mention, 
-        num_entity, 
-        num_sent, 
-        num_token,
-        on_hot_encoding,
+        batch_entity_pos, 
+        batch_sent_pos, 
+        graphs, 
+        num_mentions, 
+        num_entities, 
+        num_sents,
         labels=None, 
         hts=None
     ):
         
         sequence_output, attention = self.encode(input_ids, attention_mask)
-        bs, _, d = sequence_output.shape
-        mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
-        entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
-        sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
-        token_embed = self.get_token_embed(sequence_output, token_pos, num_token)
+        mention_embed = self.get_mention_embed(sequence_output, batch_entity_pos, num_mentions)
+        entity_embed = self.get_entity_embed(sequence_output, batch_entity_pos, num_entities)
+        sent_embed = self.get_sent_embed(sequence_output, batch_sent_pos, num_sents)
 
-        print(mention_embed.shape)
-        print(entity_embed.shape)
-        print(sent_embed.shape)
-        print(token_embed.shape)
-        entity_hidden_state, _ = self.gnn([on_hot_encoding, mention_embed, entity_embed, sent_embed, token_embed, graph])
-        
-        local_context = self.get_hrt(sequence_output, attention, entity_pos, hts)
-        s_embed, t_embed = self.get_pair_entity_embed(entity_hidden_state, hts)
+        local_context = self.get_hrt(sequence_output, attention, batch_entity_pos, hts)
+        s_embed, t_embed = self.get_pair_entity_embed(entity_embed, hts)
 
-        if self.channel_type == 'context-based':
+        if self.use_unet:
             feature_map = self.get_channel_map(sequence_output, attn_input)
             attn_input = self.liner(feature_map).permute(0, 3, 1, 2).contiguous()
             attn_map = self.segmentation_net(attn_input)
-        elif self.channel_type == 'similarity-based':
-            
-            ent_encode = sequence_output.new_zeros(bs, self.min_height, d)
-
-            for _b in range(bs):
-                entity_emb = entity_hidden_state[_b]
-                entity_num = entity_emb.size(0)
-                ent_encode[_b, :entity_num, :] = entity_emb
-            
-            # similar1 = []
-            # for ent_encode
-            # similar1 = [ent_encode[i].dot(ent_encode[j]) for i in range()]
-           
-            # similar2 = CosineMatrixAttention()(ent_encode, ent_encode).unsqueeze(-1)
-            
-            # similar3 = BilinearMatrixAttention(self.emb_size, self.emb_size).to(ent_encode.device)(ent_encode, ent_encode).unsqueeze(-1)
-            
-            # attn_input = torch.cat([similar1,similar2,similar3],dim=-1).permute(0, 3, 1, 2).contiguous()
         else:
-            # attn_input = self.get_channel_map(sequence_output, local_context)
             attn_map = self.get_channel_map(sequence_output, local_context)
-            # raise Exception("channel_type must be specify correctly")
-
         
-        h_t = self.get_ht (attn_map, hts)
-        print(h_t.shape)
-        print(s_embed.shape)
-        s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t], dim=1)))
-        t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t], dim=1)))
+        h_t = self.get_ht(attn_map, hts)
+
+        if not(self.use_graph):
+            s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t], dim=1)))
+            t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t], dim=1)))
+        else:
+            s_embed_enhance, t_embed_enhance = self.graph(
+                sequence_output, 
+                graphs, 
+                attention, 
+                batch_entity_pos, 
+                mention_embed, 
+                sent_embed, 
+                hts
+            )
+            s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t, s_embed_enhance], dim=1)))
+            t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t, t_embed_enhance], dim=1))) 
+
         b1 = s_embed.view(-1, self.emb_size // self.block_size, self.block_size)
         b2 = t_embed.view(-1, self.emb_size // self.block_size, self.block_size)
         bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)

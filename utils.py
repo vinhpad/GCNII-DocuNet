@@ -73,28 +73,3 @@ def process_long_input(encode_model, input_ids, attention_mask, start_tokens, en
         sequence_output = torch.stack(new_output, dim=0)
         attention = torch.stack(new_attention, dim=0)
     return sequence_output, attention
-
-
-def dot_product_matrix_attention(self, matrix_1: torch.Tensor, matrix_2: torch.Tensor) -> torch.Tensor:
-
-    return matrix_1.matmul(matrix_2.transpose(-1, -2))
-
-
-def cosine_matrix_attention(matrix_1: torch.Tensor, matrix_2: torch.Tensor) -> torch.Tensor:
-    """
-    Computes the cosine similarity between two matrices after normalizing them.
-    
-    Args:
-        matrix_1: Tensor of shape (batch_size, seq_len_1, hidden_dim)
-        matrix_2: Tensor of shape (batch_size, seq_len_2, hidden_dim)
-
-    Returns:
-        Tensor of shape (batch_size, seq_len_1, seq_len_2) containing cosine similarities.
-    """
-    # Normalize matrix_1 along the hidden_dim
-    a_norm = matrix_1 / (matrix_1.norm(p=2, dim=-1, keepdim=True) + 1e-12)
-    # Normalize matrix_2 along the hidden_dim
-    b_norm = matrix_2 / (matrix_2.norm(p=2, dim=-1, keepdim=True) + 1e-12)
-    # Compute the similarity via batch matrix multiplication
-    return torch.bmm(a_norm, b_norm.transpose(-1, -2))
-

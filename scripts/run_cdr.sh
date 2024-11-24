@@ -1,8 +1,7 @@
 export CUDA_VISIBLE_DEVICES=0
 
 if true; then
-type="d"
-bs=1
+bs=2
 bl=3e-5
 uls=(2e-5)
 accum=1
@@ -13,7 +12,6 @@ for seed in ${seeds[@]}
   do
   python3 -u  ./bio_train.py --data_dir ./dataset/cdr \
     --max_height 42 \
-    --channel_type $type \
     --bert_lr $bl \
     --transformer_type bert \
     --model_name_or_path microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext \
@@ -28,12 +26,11 @@ for seed in ${seeds[@]}
     --max_grad_norm 1.0 \
     --warmup_ratio 0.06 \
     --num_train_epochs 20 \
-    --tau 0.7 \
     --gnn_num_layer 4 \
     --seed $seed \
     --num_class 2 \
-    --save_path output/checkpoints/cdr/train_scibert-lr${bl}_accum${accum}_unet-lr${ul}_bs${bs}.pt \
-    --log_dir output/logs/cdr/train_scibert-lr${bl}_accum${accum}_unet-lr${ul}_bs${bs}.log
+    --save_path checkpoints/cdr/train_scibert-lr${bl}_accum${accum}_unet-lr${ul}_bs${bs}.pt \
+    --log_dir logs/cdr/train_scibert-lr${bl}_accum${accum}_unet-lr${ul}_bs${bs}.log
   done
 done
 fi
