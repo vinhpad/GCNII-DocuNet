@@ -151,17 +151,17 @@ def evaluate(args, model, features, tag='test'):
         ) = batch
 
         inputs = {
-            'input_ids': input_ids.to(args.device),
-            'attention_mask': input_mask.to(args.device),
-            'batch_entity_pos': batch_entity_pos,
-            'batch_sent_pos': batch_sent_pos,
-            'graph': graphs,
-            'num_mention': num_mentions,
-            'num_entities': num_entities,
-            'num_sent': num_sents,
-            'labels': labels,
-            'hts': hts,
-        }
+                'input_ids': input_ids.to(args.device),
+                'attention_mask': input_mask.to(args.device),
+                'batch_entity_pos': batch_entity_pos,
+                'batch_sent_pos': batch_sent_pos,
+                'graphs': graphs,
+                'num_mentions': num_mentions,
+                'num_entities': num_entities,
+                'num_sents': num_sents,
+                # 'labels': labels,
+                'hts': hts,
+            }
 
         with torch.no_grad():
             output = model(**inputs)
