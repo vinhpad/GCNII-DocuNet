@@ -248,7 +248,7 @@ class DocREModel(nn.Module):
 
     
         for _, graph_layer in enumerate(self.graph_layers):
-            graph_fea, _ = graph_layer(graph_fea.to(self.device), graph_adj.to(self.device))
+            graph_fea, _ = graph_layer(graph_fea, graph_adj)
 
         
         batch_entity_embeds = torch.zeros((batch_size, num_entity, embed_dim)).to(self.device)
@@ -282,7 +282,6 @@ class DocREModel(nn.Module):
         sequence_output, attention = self.encode(input_ids, attention_mask)
         mention_embed = self.get_mention_embed(sequence_output, batch_entity_pos, num_mentions)
         entity_embed = self.get_entity_embed(sequence_output, batch_entity_pos, num_entities)
- 
         sent_embed = self.get_sent_embed(sequence_output, batch_sent_pos, num_sents)
 
         local_context = self.get_hrt(sequence_output, attention, batch_entity_pos, hts)

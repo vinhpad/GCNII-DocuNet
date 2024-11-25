@@ -293,9 +293,9 @@ def main():
     train_file = os.path.join(args.data_dir, args.train_file)
     dev_file = os.path.join(args.data_dir, args.dev_file)
     test_file = os.path.join(args.data_dir, args.test_file)
-    train_features = reader(file_in=train_file, save_file="train.cache", tokenizer=tokenizer, max_seq_length=args.max_seq_length)
-    dev_features = reader(file_in=dev_file, save_file="dev.cache", tokenizer=tokenizer, max_seq_length=args.max_seq_length)
-    test_features = reader(file_in=test_file, save_file="test.cache",tokenizer=tokenizer, max_seq_length=args.max_seq_length)
+    train_features = reader(file_in=train_file, tokenizer=tokenizer, max_seq_length=args.max_seq_length)
+    dev_features = reader(file_in=dev_file, tokenizer=tokenizer, max_seq_length=args.max_seq_length)
+    test_features = reader(file_in=test_file,tokenizer=tokenizer, max_seq_length=args.max_seq_length)
 
     bert_config = AutoConfig.from_pretrained(
         pretrained_model_name_or_path=args.model_name_or_path,
