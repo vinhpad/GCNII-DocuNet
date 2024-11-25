@@ -1,11 +1,11 @@
 export CUDA_VISIBLE_DEVICES=0
 
 if true; then
-bs=2
+bs= 4
 bl=3e-5
 uls=(2e-5)
 accum=1
-seeds=(666 122 111 222 203)
+seeds=(666) #  122 111 222 203)
 for seed in ${seeds[@]}
   do
   for ul in ${uls[@]}
@@ -25,7 +25,7 @@ for seed in ${seeds[@]}
     --learning_rate $ul \
     --max_grad_norm 1.0 \
     --warmup_ratio 0.06 \
-    --num_train_epochs 20 \
+    --num_train_epochs 30 \
     --gnn_num_layer 1 \
     --seed $seed \
     --num_class 2 \
