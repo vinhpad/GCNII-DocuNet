@@ -253,11 +253,12 @@ class DocREModel(nn.Module):
         
         batch_entity_embeds = torch.zeros((batch_size, num_entity, embed_dim)).to(self.device)
         for i in range(batch_size):
+            mention_idx = 0
             for ent_id, e in enumerate(batch_entity_pos[i]):
                 e_emb = []
                 for mention_id, _ in enumerate(e):
-                    mention_embed = graph_fea[i][mention_id]
-
+                    mention_embed = graph_fea[i][mention_idx]
+                    mention_idx = mention_idx + 1
                     e_emb.append(mention_embed)
                 batch_entity_embeds[i, ent_id] = torch.logsumexp(torch.stack(e_emb, dim=0), dim=0)
 
