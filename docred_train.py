@@ -96,15 +96,15 @@ def train(args, model, train_features, dev_features, test_features):
                         total_loss = 0
                         start_time = time.time()
 
-                if (step + 1) == len(train_dataloader) or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
-                    eval_start_time = time.time()
-                    _, dev_output = evaluate(args, model, dev_features, tag="dev")
-                    # _, test_output = evaluate(args, model, test_features, tag="test")
+                # if (step + 1) == len(train_dataloader) or (args.evaluation_steps > 0 and num_steps % args.evaluation_steps == 0 and step % args.gradient_accumulation_steps == 0):
+                #     eval_start_time = time.time()
+                #     _, dev_output = evaluate(args, model, dev_features, tag="dev")
+                #     # _, test_output = evaluate(args, model, test_features, tag="test")
 
-                    wandb.log({"dev-output": dev_output})
+                #     wandb.log({"dev-output": dev_output})
 
-                    logger.info('| epoch {:3d} | time: {:5.2f}s | test_output:{}'
-                                .format(epoch, time.time() - eval_start_time, dev_output))
+                #     logger.info('| epoch {:3d} | time: {:5.2f}s | test_output:{}'
+                #                 .format(epoch, time.time() - eval_start_time, dev_output))
                     
             if args.save_path != "":
                 torch.save({
@@ -297,7 +297,7 @@ def main():
     parser.add_argument("--log_dir", type=str, default='', help="log.")
     parser.add_argument('--save_path', type=str, default='output')
 
-    parser.add_argument("--use_unet", type=bool, default=True)
+    parser.add_argument("--use_unet", type=bool, default=False)
     
     parser.add_argument("--unet_in_dim", type=int, default=3,
                         help="unet_in_dim.")
@@ -364,7 +364,7 @@ def main():
     args.bert_config = bert_config
     model = DocREModel(args, bert_model, num_labels=args.num_labels)
     model.to(device)
-    args.load_path = 'checkpoints/docred/train_roberta-lr3e-5_accum2_unet-lr4e-4_type__seed_3.pt'
+    # args.load_path = 'checkpoints/docred/train_roberta-lr3e-5_accum2_unet-lr4e-4_type__seed_3.pt'
     if args.load_path == "":
         train_features.extend(dev_features)
         train(args, model, train_features, dev_features, test_features)
