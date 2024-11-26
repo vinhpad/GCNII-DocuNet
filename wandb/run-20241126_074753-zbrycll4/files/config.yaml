@@ -1,0 +1,100 @@
+_wandb:
+    value:
+        cli_version: 0.18.7
+        m: []
+        python_version: 3.11.9
+        t:
+            "1":
+                - 1
+                - 11
+                - 49
+                - 55
+            "2":
+                - 1
+                - 11
+                - 41
+                - 49
+                - 55
+            "3":
+                - 16
+                - 23
+                - 55
+            "4": 3.11.9
+            "5": 0.18.7
+            "6": 4.46.3
+            "8":
+                - 5
+            "12": 0.18.7
+            "13": linux-x86_64
+adam_epsilon:
+    value: 1e-06
+bert_lr:
+    value: 3e-05
+config_name:
+    value: ""
+data_dir:
+    value: ./dataset/docred
+dev_file:
+    value: dev.json
+device:
+    value: cuda:0
+down_dim:
+    value: 256
+evaluation_steps:
+    value: 400
+gnn_num_layer:
+    value: 1
+gnn_num_node_type:
+    value: 2
+gradient_accumulation_steps:
+    value: 2
+iters:
+    value: 2
+learning_rate:
+    value: 0.0004
+load_path:
+    value: ""
+log_dir:
+    value: ./logs/docred/train_roberta-lr3e-5_accum2_unet-lr4e-4_type__seed_3.log
+max_grad_norm:
+    value: 1
+max_height:
+    value: 42
+max_seq_length:
+    value: 1024
+model_name_or_path:
+    value: roberta-large
+num_class:
+    value: 97
+num_labels:
+    value: 4
+num_train_epochs:
+    value: 30
+save_path:
+    value: ./checkpoints/docred/train_roberta-lr3e-5_accum2_unet-lr4e-4_type__seed_3.pt
+seed:
+    value: 3
+test_batch_size:
+    value: 4
+test_file:
+    value: test.json
+tokenizer_name:
+    value: ""
+train_batch_size:
+    value: 4
+train_file:
+    value: train_annotated.json
+transformer_type:
+    value: roberta
+unet_in_dim:
+    value: 3
+unet_out_dim:
+    value: 256
+use_graph:
+    value: true
+use_unet:
+    value: true
+wandb_project_name:
+    value: thesis
+warmup_ratio:
+    value: 0.06

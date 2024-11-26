@@ -1,11 +1,11 @@
 export CUDA_VISIBLE_DEVICES=0
 
 if true; then
-bs= 4
+bs=4
 bl=3e-5
-uls=(2e-5)
+uls=(3e-5)
 accum=1
-seeds=(666) #  122 111 222 203)
+seeds=(203) #  122 111 222 666)
 for seed in ${seeds[@]}
   do
   for ul in ${uls[@]}

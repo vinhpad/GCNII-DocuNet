@@ -35,8 +35,9 @@ def train(args, model, train_features, dev_features, test_features):
         scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
 
         
+        global_step = 0
+        log_step = 100
         total_loss = 0
-        log_step = 50
 
         for epoch in tqdm(train_iterator):
             start_time = time.time()
@@ -113,12 +114,15 @@ def train(args, model, train_features, dev_features, test_features):
                 }, args.save_path
                 , _use_new_zipfile_serialization=False)
                 
-    new_layer = ["extractor", "bilinear", "graph"]
+    extract_layer = ["extractor", "bilinear", "graph"]
+    bert_layer = ['bert_model']
     
     optimizer_grouped_parameters = [
-        {"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in new_layer)], },
-        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in new_layer)], "lr": 1e4},
+        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in bert_layer)], "lr": args.bert_lr},
+        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in extract_layer)], "lr": 1e-4},
+        {"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in extract_layer + bert_layer)]},
     ]
+
 
     optimizer = AdamW(
         optimizer_grouped_parameters, 
@@ -165,7 +169,7 @@ def evaluate(args, model, features, tag='test'):
 
         with torch.no_grad():
             output = model(**inputs)
-            pred = output[-1].cpu().numpy()
+            pred = output[0].cpu().numpy()
             pred[np.isnan(pred)] = 0
             preds.append(pred)
             golds.append(np.concatenate([np.array(label, np.float32) for label in labels], axis=0))
@@ -187,7 +191,7 @@ def evaluate(args, model, features, tag='test'):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--wandb_project_name", default="thesis-local", type=str)
+    parser.add_argument("--wandb_project_name", default="thesis-loca", type=str)
     parser.add_argument("--data_dir", default='./dataset/cdr', type=str)
     parser.add_argument("--transformer_type", default='', type=str)
     parser.add_argument("--model_name_or_path", default='', type=str)
@@ -224,7 +228,9 @@ def main():
 
     parser.add_argument("--learning_rate", default=2e-5, type=float,
                         help="The initial learning rate for Adam.")
-
+    parser.add_argument("--bert_lr", default=5e-5, type=float, 
+                        help="The initial learning rate for Adam.")
+    
     parser.add_argument("--adam_epsilon", default=1e-6, type=float,
                         help="Epsilon for Adam optimizer.")
     
@@ -252,13 +258,9 @@ def main():
     parser.add_argument("--unet_out_dim", type=int, default=768, help="unet_out_dim.")
     parser.add_argument("--max_height", type=int, default=42, help="log.")
 
-    parser.add_argument("--bert_lr", default=5e-5, type=float, help="The initial learning rate for Adam.")
-    
-    
     parser.add_argument("--use_graph", type=bool, default=True)
     parser.add_argument("--gnn_num_layer", type=int, default=1)
     parser.add_argument("--gnn_num_node_type", type=int, default=2)
-    parser.add_argument("--gnn_hidden_feat_dim", type=int, default=256)
     
     args = parser.parse_args()
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')

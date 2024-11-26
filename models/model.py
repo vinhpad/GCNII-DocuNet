@@ -22,9 +22,6 @@ class DocREModel(nn.Module):
         self.bert_hidden_size = args.bert_config.hidden_size
         
         # graph neural network model config
-
-        # self.gnn_hidden_size = self.bert_hidden_size + args.gnn_node_type_embedding
-
         self.edges = [
             'self-loop', 
             'sentence-sentence',
@@ -40,28 +37,37 @@ class DocREModel(nn.Module):
                     self.bert_hidden_size, 
                     nhead=args.gnn_num_node_type, 
                     iters=args.gnn_num_layer
-                ) for _ in range(args.gnn_num_layer)
+                ) for _ in range(args.iters)
             )
 
         # Unet config
+        self.unet_in_dim = args.unet_in_dim
+        self.unet_out_dim = args.unet_in_dim
+        self.liner = nn.Linear(self.bert_hidden_size, args.unet_in_dim)
         self.min_height = args.max_height
-        self.unet_in_dim = self.bert_hidden_size
-        self.unet_out_dim = self.bert_hidden_size
-
         self.segmentation_net = AttentionUNet(
-            input_channels=self.unet_in_dim,
+            input_channels=args.unet_in_dim,
             down_channel=args.down_dim,
-            output_channels=self.unet_out_dim,
+            output_channels=args.unet_out_dim,
         )
-        
         # Model config
 
         if args.use_graph:
-            self.head_extractor = nn.Linear( 3 * self.bert_hidden_size, emb_size)
-            self.tail_extractor = nn.Linear( 3 * self.bert_hidden_size, emb_size)
+            if args.use_unet:
+                extractor_dim = 2 * self.bert_hidden_size + args.unet_out_dim
+            else:
+                extractor_dim = 3 * self.bert_hidden_size
+                
+            self.head_extractor = nn.Linear( extractor_dim, emb_size)
+            self.tail_extractor = nn.Linear( extractor_dim, emb_size)
         else: 
-            self.head_extractor = nn.Linear( 2 * self.bert_hidden_size, emb_size)
-            self.tail_extractor = nn.Linear( 2 * self.bert_hidden_size, emb_size)
+            if args.use_unet:
+                extractor_dim = 1 * self.bert_hidden_size + args.unet_out_dim
+            else:
+                extractor_dim = 2 * self.bert_hidden_size
+                
+            self.head_extractor = nn.Linear( extractor_dim, emb_size)
+            self.tail_extractor = nn.Linear( extractor_dim, emb_size)
 
         self.binary_linear = nn.Linear(emb_size * block_size, self.bert_config.num_labels)
         self.num_labels = num_labels
@@ -85,32 +91,27 @@ class DocREModel(nn.Module):
             attention_mask, start_tokens, end_tokens)
         return sequence_output, attention
 
-    def get_sent_embed(self, sequence_output, batch_sent_pos, num_sents):
+    def get_sent_embed(self, sequence_output, batch_sent_pos, num_sent):
         batch_size, _, embed_dim = sequence_output.shape
-        num_sent = max([s for s in num_sents])
         sent_embed = torch.zeros((batch_size, num_sent, embed_dim)).to(self.device)
         for batch_id, sent_pos in enumerate(batch_sent_pos):
             for sent_id, pos in enumerate(sent_pos):
                 sent_embed[batch_id, sent_id] = sequence_output[batch_id, pos[0] + self.offset]
         return sent_embed
 
-    def get_mention_embed(self, sequence_output, batch_entity_pos, num_mentions):
+    def get_mention_embed(self, sequence_output, batch_entity_pos, num_mention):
         batch_size, _, embed_dim = sequence_output.shape
-        num_mention = max ([num_ment for num_ment in num_mentions])
         mention_embed = torch.zeros((batch_size, num_mention, embed_dim)).to(self.device)
-
         for batch_id, entity_pos in enumerate(batch_entity_pos):
             mention_id = 0
             for ent_pos in entity_pos:
                 for mention_pos in ent_pos:
                     mention_embed[batch_id, mention_id] = sequence_output[batch_id, mention_pos[0] + self.offset]
                     mention_id += 1
-        
         return mention_embed
 
-    def get_entity_embed(self, sequence_output, batch_entity_pos, num_entities):
+    def get_entity_embed(self, sequence_output, batch_entity_pos, num_entity):
         batch_size, _, embed_dim = sequence_output.shape
-        num_entity = max([num_ent for num_ent in num_entities])
         entity_embed = torch.zeros((batch_size, num_entity, embed_dim)).to(self.device)
         for batch_id, entity_pos in enumerate(batch_entity_pos):
             for entity_id, ent_pos in enumerate(entity_pos):
@@ -232,8 +233,6 @@ class DocREModel(nn.Module):
             nodes_num = len(graph)
             num_mention = sum([len(mention_pos) for mention_pos in batch_entity_pos[i]])
 
-            # print(graph.shape)
-            
             for vertex_i in range(nodes_num):
                 for vertex_j in range(nodes_num):
                     graph_adj[i][vertex_i][vertex_j] = graph[vertex_i][vertex_j]
@@ -249,7 +248,6 @@ class DocREModel(nn.Module):
     
         for _, graph_layer in enumerate(self.graph_layers):
             graph_fea, _ = graph_layer(graph_fea, graph_adj)
-
         
         batch_entity_embeds = torch.zeros((batch_size, num_entity, embed_dim)).to(self.device)
         for i in range(batch_size):
@@ -278,13 +276,17 @@ class DocREModel(nn.Module):
         labels=None, 
         hts=None
     ):
+        num_mention = max(num_mentions)
+        num_entity = max(num_entities)
+        num_sent = max(num_sents)
         
         sequence_output, attention = self.encode(input_ids, attention_mask)
-        mention_embed = self.get_mention_embed(sequence_output, batch_entity_pos, num_mentions)
-        entity_embed = self.get_entity_embed(sequence_output, batch_entity_pos, num_entities)
-        sent_embed = self.get_sent_embed(sequence_output, batch_sent_pos, num_sents)
+        mention_embed = self.get_mention_embed(sequence_output, batch_entity_pos, num_mention)
+        entity_embed = self.get_entity_embed(sequence_output, batch_entity_pos, num_entity)
+        sent_embed = self.get_sent_embed(sequence_output, batch_sent_pos, num_sent)
 
         local_context = self.get_hrt(sequence_output, attention, batch_entity_pos, hts)
+        
         s_embed, t_embed = self.get_pair_entity_embed(entity_embed, hts)
 
         if self.use_unet:
@@ -296,7 +298,7 @@ class DocREModel(nn.Module):
         
         h_t = self.get_ht(attn_map, hts)
 
-        if not(self.use_graph):
+        if self.use_graph == False:
             s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t], dim=1)))
             t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t], dim=1)))
         else:
