@@ -44,6 +44,7 @@ class DocREModel(nn.Module):
         self.unet_in_dim = args.unet_in_dim
         self.unet_out_dim = args.unet_in_dim
         self.liner = nn.Linear(self.bert_hidden_size, args.unet_in_dim)
+        
         self.min_height = args.max_height
         self.segmentation_net = AttentionUNet(
             input_channels=args.unet_in_dim,
@@ -69,7 +70,9 @@ class DocREModel(nn.Module):
             self.head_extractor = nn.Linear( extractor_dim, emb_size)
             self.tail_extractor = nn.Linear( extractor_dim, emb_size)
 
-        self.binary_linear = nn.Linear(emb_size * block_size, self.bert_config.num_labels)
+        self.extractor_linear_1 = nn.Linear( emb_size, emb_size//2)
+        self.extractor_linear_2 = nn.Linear( emb_size//2, emb_size//4)
+        self.binary_linear = nn.Linear(emb_size // 4, self.bert_config.num_labels)
         self.num_labels = num_labels
         self.emb_size = emb_size
         self.block_size = block_size
@@ -316,10 +319,13 @@ class DocREModel(nn.Module):
             t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t, t_embed_enhance], dim=1))) 
   
 
-        b1 = s_embed.view(-1, self.emb_size // self.block_size, self.block_size)
-        b2 = t_embed.view(-1, self.emb_size // self.block_size, self.block_size)
-        bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
-        logits = self.binary_linear(bl)
+        # b1 = s_embed.view(-1, self.emb_size // self.block_size, self.block_size)
+        # b2 = t_embed.view(-1, self.emb_size // self.block_size, self.block_size)
+        # bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
+
+        b1 = self.extractor_linear_1(s_embed * t_embed)
+        b2 = self.extractor_linear_2(b1)
+        logits = self.binary_linear(b2)
 
         output = (self.loss_fnt.get_label(logits, num_labels=self.num_labels),)
         if labels is not None:
