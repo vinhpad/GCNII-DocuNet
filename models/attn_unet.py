@@ -7,10 +7,10 @@ class AttentionUNet(torch.nn.Module):
     UNet, down sampling & up sampling for global reasoning
     """
 
-    def __init__(self, input_channels, class_number, **kwargs):
+    def __init__(self, input_channels, output_channels, **kwargs):
         super(AttentionUNet, self).__init__()
 
-        down_channel = kwargs['down_channel']  # default = 256
+        down_channel = kwargs['down_channel']  # default = 512
 
         down_channel_2 = down_channel * 2
         up_channel_1 = down_channel_2 * 2
@@ -22,7 +22,7 @@ class AttentionUNet(torch.nn.Module):
 
         self.up1 = UpLayer(up_channel_1, up_channel_1 // 4)
         self.up2 = UpLayer(up_channel_2, up_channel_2 // 4)
-        self.outc = OutConv(up_channel_2 // 4, class_number)
+        self.outc = OutConv(up_channel_2 // 4, output_channels)
 
     def forward(self, attention_channels):
         """

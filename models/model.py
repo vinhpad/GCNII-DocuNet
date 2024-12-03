@@ -1,60 +1,78 @@
 import torch
-import numpy as np
-import torch.nn.functional as F
 
 from torch import nn
-from models.losses import balanced_loss as ATLoss
 from opt_einsum import contract
-from .gnn import GNN
 from models.attn_unet import AttentionUNet
+from models.graph import AttentionGCNLayer
 from utils import process_long_input
-from augmentation_graph import augmentation
-from .grace import GRACE
+
+from models.losses import balanced_loss as ATLoss
 
 class DocREModel(nn.Module):
     def __init__(self, args, bert_model, emb_size=768, block_size=64, num_labels=-1):
         super().__init__()
         
+        self.use_graph = args.use_graph
+        self.use_unet = args.use_unet
+
         # BERT model config
         self.bert_model = bert_model
         self.bert_config = args.bert_config
         self.bert_drop = nn.Dropout(0.6)
         self.bert_hidden_size = args.bert_config.hidden_size
-
         
         # graph neural network model config
-        self.gnn_hidden_size = self.bert_hidden_size + args.gnn_node_type_embedding
-        self.gnn = GNN(
-            num_node_type=args.gnn_num_node_type, 
-            node_type_embedding=args.gnn_node_type_embedding,
-            hidden_feat_dim=self.gnn_hidden_size, 
-            device=args.device
-        )
-        
-        # GRACE model config
-        self.edge_drop_prob_first = args.edge_prob_first
-        self.edge_drop_prob_second = args.edge_prob_second
-        self.grace_model = GRACE(
-            encoder=None,
-            num_hidden = self.gnn_hidden_size, 
-            num_proj_hidden=args.grace_projection_hidden_feat_dim, 
-            tau=args.tau
-        ).to(args.device)
-        
+        self.edges = [
+            'self-loop', 
+            'sentence-sentence',
+            'mention-sent',
+            'co-reference', 
+            'inter-entity'
+        ]
+
+        if self.use_graph:
+            self.graph_layers = nn.ModuleList(
+                AttentionGCNLayer(
+                    self.edges, 
+                    self.bert_hidden_size, 
+                    nhead=args.gnn_num_node_type, 
+                    iters=args.gnn_num_layer
+                ) for _ in range(args.iters)
+            )
+
         # Unet config
         self.unet_in_dim = args.unet_in_dim
         self.unet_out_dim = args.unet_in_dim
         self.liner = nn.Linear(self.bert_hidden_size, args.unet_in_dim)
-        self.min_height = args.max_height
-        self.channel_type = args.channel_type
-        self.segmentation_net = AttentionUNet(input_channels=args.unet_in_dim,
-                                              class_number=args.unet_out_dim,
-                                              down_channel=args.down_dim)
         
+        self.min_height = args.max_height
+        self.segmentation_net = AttentionUNet(
+            input_channels=args.unet_in_dim,
+            down_channel=args.down_dim,
+            output_channels=args.unet_out_dim,
+        )
         # Model config
-        self.head_extractor = nn.Linear(self.gnn_hidden_size + args.unet_out_dim, emb_size)
-        self.tail_extractor = nn.Linear(self.gnn_hidden_size + args.unet_out_dim, emb_size)
-        self.binary_linear = nn.Linear(emb_size * block_size, self.bert_config.num_labels)
+
+        if args.use_graph:
+            if args.use_unet:
+                extractor_dim = 2 * self.bert_hidden_size + args.unet_out_dim
+            else:
+                extractor_dim = 3 * self.bert_hidden_size
+                
+            self.head_extractor = nn.Linear( extractor_dim, emb_size)
+            self.tail_extractor = nn.Linear( extractor_dim, emb_size)
+        else: 
+            if args.use_unet:
+                extractor_dim = 1 * self.bert_hidden_size + args.unet_out_dim
+            else:
+                extractor_dim = 2 * self.bert_hidden_size
+                
+            self.head_extractor = nn.Linear( extractor_dim, emb_size)
+            self.tail_extractor = nn.Linear( extractor_dim, emb_size)
+
+        self.extractor_linear_1 = nn.Linear( emb_size, emb_size//2)
+        self.extractor_linear_2 = nn.Linear( emb_size//2, emb_size//4)
+        self.binary_linear = nn.Linear(emb_size // 4, self.bert_config.num_labels)
         self.num_labels = num_labels
         self.emb_size = emb_size
         self.block_size = block_size
@@ -67,12 +85,13 @@ class DocREModel(nn.Module):
         if config.transformer_type == "bert":
             start_tokens = [config.cls_token_id]
             end_tokens = [config.sep_token_id]
+        
         elif config.transformer_type == "roberta":
             start_tokens = [config.cls_token_id]
             end_tokens = [config.sep_token_id, config.sep_token_id]
             
-        sequence_output, attention = process_long_input(self.bert_model, input_ids, attention_mask, start_tokens,
-                                                        end_tokens)
+        sequence_output, attention = process_long_input(self.bert_model, input_ids, 
+            attention_mask, start_tokens, end_tokens)
         return sequence_output, attention
 
     def get_sent_embed(self, sequence_output, batch_sent_pos, num_sent):
@@ -114,23 +133,6 @@ class DocREModel(nn.Module):
         s_embed = torch.stack(s_embed, dim=0)
         t_embed = torch.stack(t_embed, dim=0)
         return s_embed, t_embed
-
-
-    def get_virtual_embed(self, sequence_output, batch_virtual_pos, num_virtual):
-        batch_size, _, embed_dim = sequence_output.shape
-        virtual_embed = torch.zeros((batch_size, num_virtual, embed_dim)).to(self.device)
-        for batch_id, virtual_pos in enumerate(batch_virtual_pos):
-            for virtual_id, vir_pos in enumerate(virtual_pos):
-                if vir_pos[0] == vir_pos[1]:
-                    virtual_embed[batch_id][virtual_id] = sequence_output[batch_id][vir_pos[0] + self.offset]
-                else:
-                    embeds = []
-                    for _, token_pos in enumerate(virtual_pos):
-                        if vir_pos[0] <= token_pos[0] < vir_pos[1]:
-                            embeds.append(sequence_output[batch_id][token_pos[0] + self.offset])
-
-                    virtual_embed[batch_id][virtual_id] = torch.logsumexp(torch.stack(embeds, dim=0), dim=0)
-        return virtual_embed
 
     def get_ht(self, rel_enco, hts):
         htss = []
@@ -212,60 +214,123 @@ class DocREModel(nn.Module):
         map_rss = torch.cat(map_rss, dim=0).reshape(bs, ne, ne, d)
         return map_rss
 
-    def forward(self, 
-                input_ids, 
-                attention_mask,
-                entity_pos, 
-                sent_pos, 
-                virtual_pos,
-                graph, 
-                num_mention, 
-                num_entity, 
-                num_sent, 
-                num_virtual,
-                labels=None, 
-                hts=None
-            ):
+    def graph(self, 
+            sequence_output, 
+            graphs, 
+            batch_entity_pos, 
+            batch_sent_pos, 
+            batch_mention_embed, 
+            batch_sent_embed, 
+            num_entities, 
+            hts
+        ):
+        batch_size, _, embed_dim = sequence_output.shape
+     
+        max_node = max([len(graph) for graph in graphs])
+        num_entity = max([num_ent for num_ent in num_entities])
+        graph_fea = torch.zeros(batch_size, max_node, self.bert_config.hidden_size, device=self.device)
+        graph_adj = torch.zeros(batch_size, max_node, max_node, device=self.device)
+        
+        
+        for i, graph in enumerate(graphs):
+            nodes_num = len(graph)
+            num_mention = sum([len(mention_pos) for mention_pos in batch_entity_pos[i]])
+
+            for vertex_i in range(nodes_num):
+                for vertex_j in range(nodes_num):
+                    graph_adj[i][vertex_i][vertex_j] = graph[vertex_i][vertex_j]
+
+            mention_embed = batch_mention_embed[i]
+            for mention_id in range(len(mention_embed)):
+                graph_fea[i][mention_id] = mention_embed[mention_id]
+            
+            sent_embed = batch_sent_embed[i]
+            for sent_id in range(len(batch_sent_pos[i])):
+                graph_fea[i][num_mention + sent_id] = sent_embed[sent_id]
+
+    
+        for _, graph_layer in enumerate(self.graph_layers):
+            graph_fea, _ = graph_layer(graph_fea, graph_adj)
+        
+        batch_entity_embeds = torch.zeros((batch_size, num_entity, embed_dim)).to(self.device)
+        for i in range(batch_size):
+            mention_idx = 0
+            for ent_id, e in enumerate(batch_entity_pos[i]):
+                e_emb = []
+                for mention_id, _ in enumerate(e):
+                    mention_embed = graph_fea[i][mention_idx]
+                    mention_idx = mention_idx + 1
+                    e_emb.append(mention_embed)
+                batch_entity_embeds[i, ent_id] = torch.logsumexp(torch.stack(e_emb, dim=0), dim=0)
+
+        h_entity, t_entity = self.get_pair_entity_embed(batch_entity_embeds, hts)
+        return h_entity, t_entity
+
+    def forward(
+        self, 
+        input_ids, 
+        attention_mask,
+        batch_entity_pos, 
+        batch_sent_pos, 
+        graphs, 
+        num_mentions, 
+        num_entities, 
+        num_sents,
+        labels=None, 
+        hts=None
+    ):
+        num_mention = max(num_mentions)
+        num_entity = max(num_entities)
+        num_sent = max(num_sents)
+        
         sequence_output, attention = self.encode(input_ids, attention_mask)
-        mention_embed = self.get_mention_embed(sequence_output, entity_pos, num_mention)
-        entity_embed = self.get_entity_embed(sequence_output, entity_pos, num_entity)
-        sent_embed = self.get_sent_embed(sequence_output, sent_pos, num_sent)
-        virtual_embed = self.get_virtual_embed(sequence_output, virtual_pos, num_virtual)
-        entity_hidden_state, _ = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph])
+        mention_embed = self.get_mention_embed(sequence_output, batch_entity_pos, num_mention)
+        entity_embed = self.get_entity_embed(sequence_output, batch_entity_pos, num_entity)
+        sent_embed = self.get_sent_embed(sequence_output, batch_sent_pos, num_sent)
+
+        local_context = self.get_hrt(sequence_output, attention, batch_entity_pos, hts)
         
-        # entity_hidden_state_grace = self.grace_model.projection(entity_embed)
+        s_embed, t_embed = self.get_pair_entity_embed(entity_embed, hts)
 
-        local_context = self.get_hrt(sequence_output, attention, entity_pos, hts)
-        s_embed, t_embed = self.get_pair_entity_embed(entity_hidden_state, hts)
-        # s_embed_grace, t_embed_grace = self.get_pair_entity_embed(entity_hidden_state_grace, hts)
+        if self.use_unet:
+            feature_map = self.get_channel_map(sequence_output, local_context)
+            attn_input = self.liner(feature_map).permute(0, 3, 1, 2).contiguous()
+            attn_map = self.segmentation_net(attn_input)
+        else:
+            attn_map = self.get_channel_map(sequence_output, local_context)
         
-        feature_map = self.get_channel_map(sequence_output, local_context)
-        attn_input = self.liner(feature_map).permute(0, 3, 1, 2).contiguous()
+        h_t = self.get_ht(attn_map, hts)
 
-        attn_map = self.segmentation_net(attn_input)
-        h_t = self.get_ht (attn_map, hts)
-        s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t], dim=1)))
-        t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t], dim=1)))
+        if self.use_graph == False:
+            s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t], dim=1)))
+            t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t], dim=1)))
+        else:
+            s_embed_enhance, t_embed_enhance = self.graph( 
+                sequence_output,
+                graphs, 
+                batch_entity_pos, 
+                batch_sent_pos,
+                mention_embed, 
+                sent_embed, 
+                num_entities,
+                hts
+            )
+            s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t, s_embed_enhance], dim=1)))
+            t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t, t_embed_enhance], dim=1))) 
+  
 
-        b1 = s_embed.view(-1, self.emb_size // self.block_size, self.block_size)
-        b2 = t_embed.view(-1, self.emb_size // self.block_size, self.block_size)
-        bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
-        logits = self.binary_linear(bl)
+        # b1 = s_embed.view(-1, self.emb_size // self.block_size, self.block_size)
+        # b2 = t_embed.view(-1, self.emb_size // self.block_size, self.block_size)
+        # bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
+
+        b1 = self.extractor_linear_1(s_embed * t_embed)
+        b2 = self.extractor_linear_2(b1)
+        logits = self.binary_linear(b2)
 
         output = (self.loss_fnt.get_label(logits, num_labels=self.num_labels),)
         if labels is not None:
             labels = [torch.tensor(label) for label in labels]
             labels = torch.cat(labels, dim=0).to(logits)
-            
-            graph_aug_1 = augmentation(graph=graph,edge_drop_prob=self.edge_drop_prob_first).to(self.device)
-            graph_aug_2 = augmentation(graph=graph,edge_drop_prob=self.edge_drop_prob_second).to(self.device)
-            _, z1 = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph_aug_1])
-            _, z2 = self.gnn([mention_embed, entity_embed, sent_embed, virtual_embed, graph_aug_2])
- 
-            grace_loss = self.grace_model.loss(z1, z2, batch_size = 0)
-            
-            altop_loss = self.loss_fnt(logits.float(), labels.float())
-            total_loss = altop_loss + grace_loss
-            
-            output = (total_loss, altop_loss, grace_loss, ) + output
+            loss = self.loss_fnt(logits.float(), labels.float())
+            output = (loss, ) + output
         return output
