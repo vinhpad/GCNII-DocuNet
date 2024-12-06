@@ -71,9 +71,9 @@ class DocREModel(nn.Module):
             self.head_extractor = nn.Linear( extractor_dim, emb_size)
             self.tail_extractor = nn.Linear( extractor_dim, emb_size)
 
-        self.extractor_linear_1 = nn.Linear( emb_size, emb_size//2)
-        self.extractor_linear_2 = nn.Linear( emb_size//2, emb_size//4)
-        self.binary_linear = nn.Linear(emb_size // 4, self.bert_config.num_labels)
+        # self.extractor_linear_1 = nn.Linear( emb_size, emb_size//2)
+        # self.extractor_linear_2 = nn.Linear( emb_size//2, emb_size//4)
+        self.binary_linear = nn.Linear(emb_size , self.bert_config.num_labels)
         self.num_labels = num_labels
         self.emb_size = emb_size
         self.block_size = block_size
