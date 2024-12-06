@@ -80,6 +80,21 @@ class DocREModel(nn.Module):
         self.device = args.device
         self.offset = 1
 
+         # CNN 
+        num_filters = 128
+        kernel_size = 5
+        self.num_filters = num_filters
+        self.kernel_size = kernel_size
+
+        # Convolutional layer
+        self.conv = nn.Conv1d(in_channels=emb_size, 
+                              out_channels=num_filters, 
+                              kernel_size=kernel_size, 
+                              padding=kernel_size // 2)
+        
+        # Fully connected layer to map features
+        self.fc = nn.Linear(num_filters, emb_size)
+
     def encode(self, input_ids, attention_mask):
         config = self.bert_config
         if config.transformer_type == "bert":
@@ -323,9 +338,17 @@ class DocREModel(nn.Module):
         # b2 = t_embed.view(-1, self.emb_size // self.block_size, self.block_size)
         # bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
 
-        b1 = self.extractor_linear_1(s_embed * t_embed)
-        b2 = self.extractor_linear_2(b1)
-        logits = self.binary_linear(b2)
+        # b1 = self.extractor_linear_1(s_embed * t_embed)
+        # b2 = self.extractor_linear_2(b1)
+
+        combined = torch.cat([s_embed, t_embed], dim=1)  # Shape: [batch_size, 2*emb_size]
+        features = self.conv(combined)  # Shape: [batch_size, num_filters, emb_size]
+        features = torch.relu(features)
+        pooled = torch.max(features, dim=2).values
+        output = self.fc(pooled)
+
+        logits = self.binary_linear(output)
+        # logits = self.binary_linear(b2)
 
         output = (self.loss_fnt.get_label(logits, num_labels=self.num_labels),)
         if labels is not None:
