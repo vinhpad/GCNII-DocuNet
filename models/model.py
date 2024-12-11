@@ -78,8 +78,8 @@ class DocREModel(nn.Module):
         self.device = args.device
         self.offset = 1
         ## CNN 
-        num_filters = 128
-        kernel_size = 5
+        num_filters = 256
+        kernel_size = 8
         self.num_filters = num_filters
         self.kernel_size = kernel_size
         # Convolutional layer
@@ -90,7 +90,7 @@ class DocREModel(nn.Module):
         
         # Fully connected layer to map features
         self.fc = nn.Linear(num_filters, emb_size)
-        
+
     def encode(self, input_ids, attention_mask):
         config = self.bert_config
         if config.transformer_type == "bert":
