@@ -7,7 +7,7 @@ bs=4
 bl=3e-5
 ul=4e-4
 accum=2
-seeds=(3 5 7 11 13)
+seeds=(5)
 for seed in ${seeds[@]}
 do
 python -u ./docred_train.py --data_dir ./dataset/docred \

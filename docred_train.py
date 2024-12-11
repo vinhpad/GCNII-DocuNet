@@ -364,7 +364,7 @@ def main():
     args.bert_config = bert_config
     model = DocREModel(args, bert_model, num_labels=args.num_labels)
     model.to(device)
-    # args.load_path = 'checkpoints/docred/train_roberta-lr3e-5_accum2_unet-lr4e-4_type__seed_7.pt'
+    # args.load_path = 'checkpoint/docred/train_roberta-lr3e-5_accum2_unet-lr4e-4_type__seed_7.pt'
     if args.load_path == "":
         train_features.extend(dev_features)
         train(args, model, train_features, dev_features, test_features)
