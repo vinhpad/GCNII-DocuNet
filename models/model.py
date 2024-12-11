@@ -83,7 +83,7 @@ class DocREModel(nn.Module):
         self.num_filters = num_filters
         self.kernel_size = kernel_size
         # Convolutional layer
-        self.conv = nn.Conv1d(in_channels=emb_size, 
+        self.conv = nn.Conv1d(in_channels=emb_size * 2, 
                               out_channels=num_filters, 
                               kernel_size=kernel_size, 
                               padding=kernel_size // 2)
