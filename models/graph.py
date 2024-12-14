@@ -27,13 +27,15 @@ class MultiHeadDotProductAttention(nn.Module):
         N_bt, N_nodes, _ = h.shape
         adj_mat = adj_mat.unsqueeze(1)
         scores = torch.zeros(N_bt, self.h, N_nodes, N_nodes).cuda()
-        for edge in range(len(self.edges)):
-            q, k = [
-                l(x).view(N_bt, -1, self.h, self.d_k).transpose(1, 2) for l, x in
-                    zip(self.linear_layers[edge], (h, h))
-            ]
+        # for edge in range(len(self.edges)):
+        #     # q, k = [
+        #     #     l(x).view(N_bt, -1, self.h, self.d_k).transpose(1, 2) for l, x in
+        #     #         zip(self.linear_layers[edge], (h, h))
+        #     # ]
             
-            scores += (edge*1.0 + 1.0) * attention(q, k).masked_fill(adj_mat != edge + 1, 0)
+        #     # scores += (edge*1.0 + 1.0) * attention(q, k).masked_fill(adj_mat != edge + 1, 0)
+        #     scores += adj_mat
+        scores += adj_mat
         scores = scores.masked_fill(scores == 0, -1e9)
         scores = self.dropout(scores)
         attn = F.softmax(scores, dim=-1)

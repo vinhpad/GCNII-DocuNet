@@ -313,7 +313,9 @@ def main():
     parser.add_argument("--iters", type=int,default=2)
     
     args = parser.parse_args()
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    args.n_gpu = torch.cuda.device_count()
+
     args.device = device
     setup_log_path(args.log_dir)
     set_seed(args.seed)
@@ -363,7 +365,11 @@ def main():
     bert_model.resize_token_embeddings(len(tokenizer))
     args.bert_config = bert_config
     model = DocREModel(args, bert_model, num_labels=args.num_labels)
+    if torch.cuda.device_count() > 1:
+        print("Let's use", torch.cuda.device_count(), "GPUs!")
+        model = torch.nn.DataParallel(model, device_ids = list(range(torch.cuda.device_count())))
     model.to(device)
+
     # args.load_path = 'checkpoint/docred/train_roberta-lr3e-5_accum2_unet-lr4e-4_type__seed_7.pt'
     if args.load_path == "":
         train_features.extend(dev_features)
