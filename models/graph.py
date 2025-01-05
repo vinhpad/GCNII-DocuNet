@@ -33,7 +33,7 @@ class MultiHeadDotProductAttention(nn.Module):
                     zip(self.linear_layers[edge], (h, h))
             ]
             
-            scores += (edge*1.0 + 1.0) * attention(q, k).masked_fill(adj_mat != edge + 1, 0)
+            scores += attention(q, k).masked_fill(adj_mat != edge + 1, 0)
         scores = scores.masked_fill(scores == 0, -1e9)
         scores = self.dropout(scores)
         attn = F.softmax(scores, dim=-1)

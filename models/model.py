@@ -57,7 +57,7 @@ class DocREModel(nn.Module):
             if args.use_unet:
                 extractor_dim = 2 * self.bert_hidden_size + args.unet_out_dim
             else:
-                extractor_dim = 3 * self.bert_hidden_size
+                extractor_dim = 4 * self.bert_hidden_size
                 
             self.head_extractor = nn.Linear( extractor_dim, emb_size)
             self.tail_extractor = nn.Linear( extractor_dim, emb_size)
@@ -65,7 +65,7 @@ class DocREModel(nn.Module):
             if args.use_unet:
                 extractor_dim = 1 * self.bert_hidden_size + args.unet_out_dim
             else:
-                extractor_dim = 2 * self.bert_hidden_size
+                extractor_dim = 3 * self.bert_hidden_size
                 
             self.head_extractor = nn.Linear( extractor_dim, emb_size)
             self.tail_extractor = nn.Linear( extractor_dim, emb_size)
@@ -77,20 +77,7 @@ class DocREModel(nn.Module):
         self.loss_fnt = ATLoss()
         self.device = args.device
         self.offset = 1
-        ## CNN 
-        num_filters = 256
-        kernel_size = 8
-        self.num_filters = num_filters
-        self.kernel_size = kernel_size
-        # Convolutional layer
-        self.conv = nn.Conv1d(in_channels=emb_size * 2, 
-                              out_channels=num_filters, 
-                              kernel_size=kernel_size, 
-                              padding=kernel_size // 2)
-        
-        # Fully connected layer to map features
-        self.fc = nn.Linear(num_filters, emb_size)
-
+ 
     def encode(self, input_ids, attention_mask):
         config = self.bert_config
         if config.transformer_type == "bert":
@@ -144,6 +131,31 @@ class DocREModel(nn.Module):
         s_embed = torch.stack(s_embed, dim=0)
         t_embed = torch.stack(t_embed, dim=0)
         return s_embed, t_embed
+    
+    def get_local_context_pair_entity(sefl, features, attn_es, hts):
+        local_context = []
+        nhead = len(attn_es)
+        attn_es.transpose(0, 1)
+        for batch_id, ht in enumerate(hts):
+            for pair in ht:
+                a_s = attn_es[batch_id, pair[0]]
+                a_o = attn_es[batch_id, pair[1]]
+            a_s_o = []    
+            for h in nhead:
+                a_s_o.append(a_s[h]*a_o[h])
+            a_s_o = torch.mean(torch.stack(a_s_o, dim=0),dim=0)
+
+            a_s_o_sum = 0.0
+            for x in a_s_o:
+                a_s_o_sum = a_s_o_sum + x
+
+            a_s_o = a_s_o / a_s_o_sum
+            a_s_o = torch.t(features[batch_id]).matmul(a_s_o)
+            local_context.append(a_s_o)
+        
+        local_context = torch.stack(local_context, dim=0)
+        return local_context
+
 
     def get_ht(self, rel_enco, hts):
         htss = []
@@ -225,6 +237,7 @@ class DocREModel(nn.Module):
         map_rss = torch.cat(map_rss, dim=0).reshape(bs, ne, ne, d)
         return map_rss
 
+
     def graph(self, 
             sequence_output, 
             graphs, 
@@ -261,21 +274,40 @@ class DocREModel(nn.Module):
 
     
         for _, graph_layer in enumerate(self.graph_layers):
-            graph_fea, _ = graph_layer(graph_fea, graph_adj)
+            graph_fea, graph_attention = graph_layer(graph_fea, graph_adj)
         
         batch_entity_embeds = torch.zeros((batch_size, num_entity, embed_dim)).to(self.device)
         for i in range(batch_size):
             mention_idx = 0
             for ent_id, e in enumerate(batch_entity_pos[i]):
                 e_emb = []
+                
                 for mention_id, _ in enumerate(e):
                     mention_embed = graph_fea[i][mention_idx]
                     mention_idx = mention_idx + 1
                     e_emb.append(mention_embed)
                 batch_entity_embeds[i, ent_id] = torch.logsumexp(torch.stack(e_emb, dim=0), dim=0)
 
+        # local context pooling
+        H = len(graph_attention)
+        attn_es = torch.zeros((H, batch_size, num_entity, max_node)).to(self.device)
+        for h in range(H):
+        
+            for i in range(batch_size):
+        
+                mention_idx = 0
+                
+                for ent_id, e in enumerate(batch_entity_pos[i]):
+                    attn_e = []
+                    for mention_id, _ in enumerate(e):
+                        attn_e.append(graph_attention[h][i][mention_idx])
+                        mention_idx = mention_idx + 1
+                    attn_es[h][i][ent_id] = torch.mean(torch.stack(attn_e, dim=0), dim=0)
+
+
         h_entity, t_entity = self.get_pair_entity_embed(batch_entity_embeds, hts)
-        return h_entity, t_entity
+        local_context = self.get_local_context_pair_entity(graph_fea, attn_es, hts)
+        return h_entity, t_entity, local_context
 
     def forward(
         self, 
@@ -316,7 +348,7 @@ class DocREModel(nn.Module):
             s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t], dim=1)))
             t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t], dim=1)))
         else:
-            s_embed_enhance, t_embed_enhance = self.graph( 
+            s_embed_enhance, t_embed_enhance, local_context_enhance = self.graph( 
                 sequence_output,
                 graphs, 
                 batch_entity_pos, 
@@ -326,8 +358,8 @@ class DocREModel(nn.Module):
                 num_entities,
                 hts
             )
-            s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t, s_embed_enhance], dim=1)))
-            t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t, t_embed_enhance], dim=1))) 
+            s_embed = torch.tanh(self.head_extractor(torch.cat([s_embed, h_t, s_embed_enhance, local_context_enhance], dim=1)))
+            t_embed = torch.tanh(self.tail_extractor(torch.cat([t_embed, h_t, t_embed_enhance, local_context_enhance], dim=1))) 
   
 
         b1 = s_embed.view(-1, self.emb_size // self.block_size, self.block_size)
