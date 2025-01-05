@@ -132,27 +132,29 @@ class DocREModel(nn.Module):
         t_embed = torch.stack(t_embed, dim=0)
         return s_embed, t_embed
     
-    def get_local_context_pair_entity(sefl, features, attn_es, hts):
+    def get_local_context_pair_entity(self, features, attn_es, hts):
         local_context = []
         nhead = len(attn_es)
-        attn_es.transpose(0, 1)
-        for batch_id, ht in enumerate(hts):
-            for pair in ht:
-                a_s = attn_es[batch_id, pair[0]]
-                a_o = attn_es[batch_id, pair[1]]
-            a_s_o = []    
-            for h in nhead:
-                a_s_o.append(a_s[h]*a_o[h])
-            a_s_o = torch.mean(torch.stack(a_s_o, dim=0),dim=0)
-
-            a_s_o_sum = 0.0
-            for x in a_s_o:
-                a_s_o_sum = a_s_o_sum + x
-
-            a_s_o = a_s_o / a_s_o_sum
-            a_s_o = torch.t(features[batch_id]).matmul(a_s_o)
-            local_context.append(a_s_o)
         
+
+        for batch_id, ht in enumerate(hts):
+            
+            for pair in ht:
+                a_s_o = []
+                for h in range(nhead):    
+                    a_s = attn_es[h, batch_id, pair[0]]
+                    a_o = attn_es[h, batch_id, pair[1]]
+                    a_s_o.append(a_s * a_o)
+                a_s_o = torch.mean(torch.stack(a_s_o, dim=0),dim=0)
+
+                a_s_o_sum = 0.0
+                for x in a_s_o:
+                    a_s_o_sum = a_s_o_sum + x
+
+                a_s_o = a_s_o / a_s_o_sum
+                a_s_o = torch.t(features[batch_id]).matmul(a_s_o)
+                local_context.append(a_s_o)
+            
         local_context = torch.stack(local_context, dim=0)
         return local_context
 
@@ -302,6 +304,7 @@ class DocREModel(nn.Module):
                     for mention_id, _ in enumerate(e):
                         attn_e.append(graph_attention[h][i][mention_idx])
                         mention_idx = mention_idx + 1
+
                     attn_es[h][i][ent_id] = torch.mean(torch.stack(attn_e, dim=0), dim=0)
 
 
@@ -366,17 +369,7 @@ class DocREModel(nn.Module):
         b2 = t_embed.view(-1, self.emb_size // self.block_size, self.block_size)
         bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(-1, self.emb_size * self.block_size)
 
-        # b1 = self.extractor_linear_1(s_embed * t_embed)
-        # b2 = self.extractor_linear_2(b1)
-
-        # combined = torch.cat([s_embed, t_embed], dim=1)  # Shape: [batch_size, 2*emb_size]
-        # features = self.conv(combined)  # Shape: [batch_size, num_filters, emb_size]
-        # features = torch.relu(features)
-        # pooled = torch.max(features, dim=2).values
-        # output = self.fc(pooled)
-
         logits = self.binary_linear(bl)
-        # logits = self.binary_linear(b2)
 
         output = (self.loss_fnt.get_label(logits, num_labels=self.num_labels),)
         if labels is not None:
